@@ -4,6 +4,10 @@ Created on Mon Jul 22 16:53:53 2019
 
 @author: SamCrowl
 """
+import numpy as np
+import pandas as pd
+from anndata import AnnData
+
 def pairSplit(pairArray):
     ans = pd.DataFrame(columns = ['gene1', 'gene2'])
     for i in range(pairArray.size):
@@ -30,6 +34,6 @@ def query_transform(adata, genePairs):
         ans.loc[:, i] = (expMat.loc[:, genes.loc[i,1]].value 
                > expMat.loc[: genes.loc[i,2]].value).astype(int)
         
-    ans2 = anndata.AnnData(ans, obs = adata.obs, var = pTab[['gene_pairs']])
+    ans2 = AnnData(ans, obs = adata.obs, var = pTab[['gene_pairs']])
     return(ans2)
         

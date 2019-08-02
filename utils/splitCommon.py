@@ -30,9 +30,9 @@ def splitCommon(adata, ncells, dLevel="cell_ontology_class"):
         print(aX.n_obs)
         trainingids = np.append(trainingids, np.random.choice(aX.obs["sample_name"].values, ccount, replace = False))
         
-    val_ids = np.setdiff1d(adata.obs["sample_name"].values, trainingids)
-    aTrain = adata[np.isin(adata.obs["sample_name"], trainingids),:]
-    aTest = adata[np.isin(adata.obs["sample_name"], val_ids),:]
+    val_ids = np.setdiff1d(adata.obs["sample_name"].values, trainingids, assume_unique = True)
+    aTrain = adata[np.isin(adata.obs["sample_name"], trainingids, assume_unique = True),:]
+    aTest = adata[np.isin(adata.obs["sample_name"], val_ids, assume_unique = True),:]
     return([aTrain, aTest])
 
 

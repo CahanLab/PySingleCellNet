@@ -4,7 +4,8 @@ Created on Wed Jul 24 16:41:03 2019
 
 @author: SamCrowl
 """
-
+import pandas as pd
+import numpy as np
 from sklearn.ensemble import RandomForestClassifier as randomforest
 
 def makeRandDF(adata, nrand = 50):
@@ -19,7 +20,7 @@ def makeRandDF(adata, nrand = 50):
         for j in adata.var.values:
             tmp = np.append(tmp, expMat.loc[j].sample(n=1).values)
         pdRand = pdRand.append(tmp)
-        
+    
     return(pdRand)
     
 
@@ -27,6 +28,7 @@ def sc_makeClassifier(aTrans, genes, groups, nrand = 50, ntrees = 1000):
     """Incomplete function. Once completed, will create a random forest based on transformed matrix and cell type groups
         
     """
+    grps = aTrans.obs[groups]
     randDat = makeRandDF(aTrans, nrand)
     ggenes = np.empty(nrand); ggenes.fill('rand')
     

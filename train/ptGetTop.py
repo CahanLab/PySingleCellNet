@@ -4,6 +4,8 @@ Created on Fri Jul 19 09:54:05 2019
 
 @author: SamCrowl
 """
+import pandas as pd
+import numpy as np
 from sklearn import linear_model
 from itertools import combinations
 

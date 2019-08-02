@@ -12,7 +12,7 @@ import rpy2.robjects as robjects
 from rpy2.robjects import pandas2ri
 from rpy2.robjects.packages import importr
 from rpy2.robjects.conversion import localconverter
-import anndata
+from anndata import AnnData
 
 def convertRDAtoAdata(expMat_file, sampTab_file, file_path):
     """Takes expMat and sampTab .rda files and converts them to one AnnData object for use in python SCN
@@ -38,7 +38,7 @@ def convertRDAtoAdata(expMat_file, sampTab_file, file_path):
         expMat = robjects.conversion.rpy2py(rdf[0])
         metadata = robjects.conversion.rpy2py(rdf[1])
     #Loads expMat into a AnnData object, with gene names as index for vars and cell_ids as index for obs
-    adata = anndata.AnnData(expMat).T
+    adata = AnnData(expMat).T
     #Load sampTab data into obs
     for data in metadata.columns.values:
         adata.obs[data] = metadata.loc[:,data].values

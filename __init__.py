@@ -6,11 +6,7 @@ Created on Mon Jul 29 16:02:01 2019
 """
 
 #Import all singleCellNet functions
-from . import convertRDAtoAdata as rdaConv
-from . import splitCommon as split
-from . import ptGetTop as topPairs
-from . import query_transform as qt
-from . import sc_makeClassifier as makeClass
+from . import utils as ut
+from . import train as tr
+from .query_transform import query_transform
 
-import scanpy as sc
-import numpy as np
