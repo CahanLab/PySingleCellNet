@@ -27,7 +27,6 @@ If your data is stored in .rda files, you will first need to convert them to an 
 expMat_file = 'fileNameForExpMat.rda'
 sampTab_file = 'fileNameForSampTab.rda'
 filepath = 'locationOfFiles'
-<<<<<<< HEAD
 adata = pscn.ut.convertRDAtoAdata(expMat_file, sampTab_file, filepath)
 ```
 ### Training the SCN classifier
@@ -42,7 +41,6 @@ aTrain = aTrain[: ,aTrain.var.index == commonGenes]
 
 #### Split for training and assessment, transform the training data
 ```python
-<<<<<<< HEAD
 aList = pscn.ut.splitCommon(aTrain, ncells = 100, dLevel = "newAnn")
 aTrain2 = aList[0]
 
@@ -51,7 +49,6 @@ sc.pp.normalize_per_cell(aTrain2, counts_per_cell_after = 1e5)
 
 #### Find the best set of classifier genes
 ```python
-<<<<<<< HEAD
 cgenes2 = pscn.tr.findClassyGenes(aTrain2, dLevel = "newAnn", topX = 10)
 
 #limit analysis to these genes
