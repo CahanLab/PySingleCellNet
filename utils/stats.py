@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import scale
+import statsmodels.api as sm
 
 def sc_statTab(expDat, dThresh=0):
     geneNames=expDat.columns.values
