@@ -122,17 +122,20 @@ def minTab(sampTab, dLevel):
     return res
 
 def sc_testPattern(pattern,expDat):
-    def oneTest(y,X):
-        X = sm.add_constant(X)
-        model = sm.OLS(y,X)
-        results = model.fit()
-        ccor = results.rsquared**0.5*np.sign(results.tvalues[1])
-        pval = results.pvalues[1]
-        return np.array([pval, ccor])
-    tempDf = expDat.apply(oneTest, axis=0, args=(pattern,))
-    tempDf = np.transpose(tempDf)
-    res = pd.DataFrame(tempDf)
-    res.columns = ["pval","cval"]
+    yy=np.vstack([pattern, np.ones(len(pattern))]).T
+    p,_,_, _ = np.linalg.lstsq(yy, expDat)
+    n = len(expDat)
+    k = len(p)
+    sigma2 = np.sum((expDat - np.dot(yy, p))**2) / (n - k)  # RMSE
+    C_pre= np.diag(np.linalg.inv(np.dot(yy.T, yy)))[0] # covariance matrix
+    C= np.sqrt(sigma2 * C_pre)
+    SS_tot = np.sum((expDat - np.mean(expDat))**2)
+    SS_err = np.sum((np.dot(yy, p) - expDat)**2)
+    Rsq = 1 - SS_err/SS_tot
+    t_val=np.divide(p[0], C)
+    res=pd.DataFrame(index=expDat.columns)
+    res["pval"]=2*stats.t.sf(np.abs(t_val), df=(n-k))
+    res["cval"]=(Rsq**0.5)*np.sign(t_val)
     _,res["holm"],_,_ = smt.multipletests(res["pval"].values, method="holm")
     return res
 
