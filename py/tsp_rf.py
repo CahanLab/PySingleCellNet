@@ -56,13 +56,17 @@ def addRandToSampTab(classRes, sampTab, desc, id="cell_name"):
 
 def ptSmall(expMat, pTab):
     npairs = len(pTab.index)
-    ans = pd.DataFrame(0, index = expMat.index, columns = np.arange(npairs))
-    ans = ans.astype(pd.SparseDtype("int", 0))
     genes1 = pTab['genes1'].values
     genes2 = pTab['genes2'].values
-    for i in range(npairs):
-        boolArray = expMat.loc[:, genes1[i]].values > expMat.loc[:, genes2[i]].values
-        ans.loc[:, i] = boolArray.astype(int)
+    expTemp=expMat.loc[:,np.unique(np.concatenate([genes1,genes2]))]
+    ans = pd.DataFrame(0, index = expTemp.index, columns = np.arange(npairs))
+    ans = ans.astype(pd.SparseDtype("int", 0))
+    temp1= expTemp.loc[:,genes1]
+    temp2= expTemp.loc[:,genes2]
+    temp1.columns=np.arange(npairs)
+    temp2.columns=np.arange(npairs)
+    boolArray = temp1 > temp2
+    ans = boolArray.astype(int)
     ans.columns = list(pTab[['gene_pairs']].values.T)
     return(ans)
 
@@ -97,10 +101,16 @@ def query_transform(expMat, genePairs):
     for g in genePairs:
         sp=g.split("_")
         genes1.append(sp[0])
-        genes2.append(sp[1])
-    for i in range(npairs):
-        boolArray = expMat.loc[:, genes1[i]].values > expMat.loc[:, genes2[i]].values
-        ans.loc[:, i] = boolArray.astype(int)
+        genes2.append(sp[1])    
+    expTemp=expMat.loc[:,np.unique(np.concatenate([genes1,genes2]))]
+    ans = pd.DataFrame(0, index = expTemp.index, columns = np.arange(npairs))
+    ans = ans.astype(pd.SparseDtype("int", 0))
+    temp1= expTemp.loc[:,genes1]
+    temp2= expTemp.loc[:,genes2]
+    temp1.columns=np.arange(npairs)
+    temp2.columns=np.arange(npairs)
+    boolArray = temp1 > temp2
+    ans = boolArray.astype(int)
     ans.columns = genePairs
     return(ans)
 
@@ -110,12 +120,17 @@ def pair_transform(expMat):
     ans = pd.DataFrame(0, index = expMat.index, columns = np.arange(npairs))
     genes1 = pTab['genes1'].values
     genes2 = pTab['genes2'].values
-
-    for i in range(npairs):
-        boolArray = expMat.loc[:, genes1[i]].values > expMat.loc[:, genes2[i]].values
-        ans.loc[:, i] = boolArray.astype(int)
-    ans.columns = list(pTab[['gene_pairs']].values.T)
-    return ans
+    expTemp=expMat.loc[:,np.unique(np.concatenate([genes1,genes2]))]
+    ans = pd.DataFrame(0, index = expTemp.index, columns = np.arange(npairs))
+    ans = ans.astype(pd.SparseDtype("int", 0))
+    temp1= expTemp.loc[:,genes1]
+    temp2= expTemp.loc[:,genes2]
+    temp1.columns=np.arange(npairs)
+    temp2.columns=np.arange(npairs)
+    boolArray = temp1 > temp2
+    ans = boolArray.astype(int)
+    ans.columns = genePairs
+    return(ans)
 
 def gnrBP(expDat,cellLabels,topX=50):
     myPatternG=sc_sampR_to_pattern(cellLabels)
