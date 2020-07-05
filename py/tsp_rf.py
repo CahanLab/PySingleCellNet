@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from sklearn import linear_model
 from itertools import combinations
 
 def csRenameOrth(expQuery,expTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
@@ -101,7 +102,7 @@ def query_transform(expMat, genePairs):
     for g in genePairs:
         sp=g.split("_")
         genes1.append(sp[0])
-        genes2.append(sp[1])    
+        genes2.append(sp[1])
     expTemp=expMat.loc[:,np.unique(np.concatenate([genes1,genes2]))]
     ans = pd.DataFrame(0, index = expTemp.index, columns = np.arange(npairs))
     ans = ans.astype(pd.SparseDtype("int", 0))
@@ -179,6 +180,7 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
         res=[]
         grps=np.unique(cell_labels)
         for g in grps:
+            print(g)
             genes=cgenes_list[g]
             pairTab=makePairTab(genes)
             nPairs=len(pairTab)

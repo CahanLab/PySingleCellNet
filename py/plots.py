@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -33,6 +34,8 @@ def sc_hmClass(classMat, grps,cRow=False,cCol=False):
         g.cax.set_position([0.125, 0.775, .475, .02])
     else:
         g.cax.set_position([0, 0.125, .03, .575])
+
+    plt.tight_layout()
     plt.show()
 
 def sc_violinClass(sampTab, classRes, dLevel="cluster", threshold=0.20,  ncol =1, sub_cluster=[] ):
@@ -43,7 +46,7 @@ def sc_violinClass(sampTab, classRes, dLevel="cluster", threshold=0.20,  ncol =1
     if sub_cluster != []:
         temp=temp.loc[temp.variable.isin(sub_cluster),:]
     temp["hue"]=temp.variable
-    fig1, axes = plt.subplots(ncols=int(ncol), nrows=int(np.ceil(len(grps_uni)/ncol)), sharex=True,sharey=False, figsize=(ncol*8, np.ceil(len(grps_uni)/ncol)*4))
+    fig1, axes = plt.subplots(ncols=int(ncol), nrows=int(np.ceil(len(grps_uni)/ncol)), sharex=True,sharey=False, figsize=(ncol*4, np.ceil(len(grps_uni)/ncol)*4))
     if len(grps_uni)>1:
         for i in range(0,len(grps_uni)):
             heyo=sns.violinplot(x="variable", y="value",hue="hue", data=temp.loc[temp[dLevel]==grps_uni[i],:], ax=axes.flat[i], scale="width" , legend=False, dodge=False)
@@ -80,3 +83,26 @@ def plot_attr(classRes, sampTab, dLevel, sub_cluster = []):
     temp.set_index('newAnn').plot(kind='barh', stacked=True, figsize=(10,8))
     plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), ncol=2)
     plt.tight_layout()
+
+def plot_umap(expMat, sampTab, dLevel="category"):
+    standard_embedding = umap.UMAP(random_state=42).fit_transform(expMat.values)
+    dat = pd.DataFrame(standard_embedding, index=expMat.index)
+    dat = pd.concat([dat, sampTab[dLevel]], axis=1)
+    dat.columns = ["component 1","component 2", "class"]
+    grps=np.unique(dat["class"])
+    for i in grps:
+        plt.scatter(dat.loc[dat["class"]==i,"component 1"], dat.loc[dat["class"]==i, "component 2"], s=1, label=i)
+    plt.xlabel("Component 1")
+    plt.ylabel("Component 2")
+    plt.legend(loc="center left", ncol=2, bbox_to_anchor=(1, 0.5))
+
+def get_cate(classRes, sampTab, cThresh = 0):
+    res=classRes.idxmax(axis=1)
+    if cThresh>0:
+        for i in range(0, len(res)):
+            if classRes.loc[res.index[i], res[i]]<cThresh:
+                res[i]="rand"
+    st=sampTab.copy()
+    st["category"]=res
+    return st
+    

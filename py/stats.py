@@ -6,8 +6,6 @@ from sklearn import datasets, linear_model
 from sklearn.linear_model import LinearRegression
 from scipy import stats
 
-# takes expression df, gene names(optional if overide expDats) and dThresh (default 0) and gives out
-# df (rows=genes, cols= differen stats)
 def sc_statTab(expDat, dThresh=0):
     geneNames=expDat.columns.values
     muAll=sc_compMu(expDat, threshold = dThresh);
@@ -182,4 +180,3 @@ def getTopGenesList(xDatList, topN = 50):
     for i in range(0, len(groups)):
         res[groups[i]]=temp[i]
     return res
-    

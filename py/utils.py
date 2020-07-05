@@ -1,6 +1,13 @@
 import datetime
-import pandas as pd
 import numpy as np
+import pandas as pd
+import os
+import rpy2.robjects as robjects
+from rpy2.robjects import pandas2ri
+from rpy2.robjects.packages import importr
+from rpy2.robjects.conversion import localconverter
+from anndata import AnnData
+
 
 def ctMerge(sampTab, annCol, ctVect, newName):
     oldRows=np.isin(sampTab[annCol], ctVect)
@@ -16,17 +23,6 @@ def ctRename(sampTab, annCol, oldName, newName):
 
 #adapted from Sam's code
 def splitCommonAnnData(adata, ncells, dLevel="cell_ontology_class", cells_reserved = 3):
-    """Split a AnnData object into groups for training and assessment
-
-    Parameters:
-        aData: AnnData object that contains both expression matrix and cell/gene meta data
-        ncells: The number of cells to be seperated for training
-        dLevel: Descriptor that labels the location of cell type annotations
-
-    Returns:
-        A list with two AnnData objects, one for training and one for assessment
-
-    """
     cts = set(adata.obs[dLevel])
     trainingids = np.empty(0)
     for ct in cts:
@@ -171,3 +167,42 @@ def cn_correctZmat_row(zmat):
         res[res<mn]=mn
         return res
     return zmat.apply(myfuncInf, axis=1)
+
+def makeExpMat(adata):
+    expMat = pd.DataFrame(adata.X, index = adata.obs_names, columns = adata.var_names)
+    return expMat
+
+def makeSampTab(adata):
+    sampTab = adata.obs
+    return sampTab
+
+def convertRDAtoAdata(expMat_file, sampTab_file, file_path):
+    """Takes expMat and sampTab .rda files and converts them to one AnnData object for use in python SCN
+
+    Parameters:
+        expMat_file: Name of expression matrix .rda file
+        sampTab_file: Name of sample table .rda file
+        file_path: location of both files (need to be in the same directory)
+
+    Returns:
+        n_obs x n_vars AnnData object which contains gene information in columns (var) and cell information in rows (obs)
+    """
+    pandas2ri.activate()
+    base = importr('base')
+    matFileName = '{}/{}'.format(file_path, expMat_file)
+    stFileName = '{}/{}'.format(file_path, sampTab_file)
+    base.load(matFileName)
+    base.load(stFileName)
+    rdf = base.mget(base.ls())
+    #converts r objects into pandas versions of expMat and sampTab
+    with localconverter(robjects.default_converter + pandas2ri.converter):
+        expMat = robjects.conversion.rpy2py(rdf[0])
+        metadata = robjects.conversion.rpy2py(rdf[1])
+    #Loads expMat into a AnnData object, with gene names as index for vars and cell_ids as index for obs
+    adata = AnnData(expMat).T
+    #Load sampTab data into obs
+    for data in metadata.columns.values:
+        adata.obs[data] = metadata.loc[:,data].values
+    #Create var for gene_ids in vars in addition to index
+    adata.var["gene_ids"] = adata.var.index.values
+    return(adata)
