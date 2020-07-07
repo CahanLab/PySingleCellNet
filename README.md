@@ -35,7 +35,8 @@ import pandas as pd
 import numpy as np
 ```
 
-## Load in training data (subset of Tabula Muris is used here, available in downloads folder)
+## Load in training data 
+#### (subset of Tabula Muris data is used here, available at https://github.com/pcahan1/SingleCellNet/)
 #### *can also extract data from AnnData object using makeExpMat and makeSampMat functions
 
 
