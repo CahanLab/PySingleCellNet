@@ -4,6 +4,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+import umap
 
 def sc_hmClass(classMat, grps,cRow=False,cCol=False):
     warnings.filterwarnings('ignore')

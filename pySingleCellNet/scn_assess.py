@@ -4,6 +4,8 @@ import pandas as pd
 import seaborn as sns
 from .stats import *
 from .scn_train import *
+import matplotlib
+import matplotlib.pyplot as plt
 
 def divide_sampTab(sampTab, prop, dLevel="cell_ontology_class"):
     cts = set(sampTab[dLevel])
@@ -113,21 +115,23 @@ def assess_comm(ct_scores, stTrain, stQuery, resolution = 0.005, nRand = 50, dLe
     y_true=true_label.str.get_dummies()
     eps = 1e-15
     y_pred = np.maximum(np.minimum(ct_scores, 1 - eps), eps)
-    multiLogLoss = (-1 / len(ct_scores_t.index)) * np.sum(np.matmul(y_true.T, np.log(y_pred)))
+    multiLogLoss = (-1 / len(ct_scores_t.index)) * np.sum(np.matmul(y_true.T.values, np.log(y_pred.values)))
     pred_label = ct_scores.idxmax(axis=1)
     cm=pd.crosstab(true_label, pred_label)
     #in case of misclassfication where there are classifiers that are not used
     if (len(np.setdiff1d(np.unique(true_label), np.unique(pred_label))) != 0):
         misCol = np.setdiff1d(np.unique(true_label), np.unique(pred_label))
         for i in range(0, len(misCol)):
-            cm = pd.concat([cm, np.zeros([0, len(cm.index)])], axis=1)
-        cm.columns[(len(cm.columns) - len(misCol)) : len(cm.columns)] = misCol
+            added = pd.DataFrame(np.zeros([len(cm.index), 1]), index=cm.index)
+            cm = pd.concat([cm, added], axis=1)
+        cm.columns.values[(len(cm.columns) - len(misCol)) : len(cm.columns)] = misCol
     if (len(np.setdiff1d(np.unique(pred_label), np.unique(true_label))) != 0):
         misRow = np.setdiff1d(np.unique(pred_label), np.unique(true_label))
         for i in range(0, len(misRow)):
-            cm = pd.concat([cm, np.zeros([len(cm.columns), 0])], axis=0)
-        cm.index[(len(cm.index) - len(misRow)) : len(cm.index)] = misRow
-    cm= cm.loc[:,cm.index.values]
+            added = pd.DataFrame(np.zeros([1, len(cm.columns)]), columns= cm.columns)
+            cm = pd.concat([cm, added], axis=0)
+        cm.index.values[(len(cm.index) - len(misRow)) : len(cm.index)] = misRow
+    cm= cm.loc[cm.index.values,:]
     n = np.sum(np.sum(cm))
     nc = len(cm.index)
     diag = np.diag(cm)
