@@ -12,11 +12,12 @@ setup(name='pySingleCellNet',
           'pandas',
           'numpy',
           'sklearn',
-          'rpy2',
+          'scanpy',
           'sklearn',
           'statsmodels',
           'scipy',
           'matplotlib',
           'seaborn',
+          'umap-learn'
       ],
       zip_safe=False)
