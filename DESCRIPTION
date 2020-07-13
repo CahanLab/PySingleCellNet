@@ -1,0 +1,19 @@
+name='pySingleCellNet',
+version='0.1',
+description='Determining cell identity from single cell RNA-Seq data',
+url='http://github.com/pcahan1/PySingleCellNet/',
+authors='Patrick Cahan','Yuqi Tan'
+author_email='patrick.cahan@gmail.com','ytan19@jhmi.edu'
+license='MIT',
+packages=['pySingleCellNet'],
+install_requires=[
+      'pandas',
+      'numpy',
+      'sklearn',
+      'scanpy',
+      'sklearn',
+      'statsmodels',
+      'scipy',
+      'matplotlib',
+      'seaborn',
+    ],

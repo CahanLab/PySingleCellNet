@@ -1,7 +1,6 @@
 
 """
 Created on Tue Jul 16 15:41:22 2019
-
 @author: SamCrowl
 """
 
@@ -46,5 +45,4 @@ def convertRDAtoAdata(expMat_file, sampTab_file, file_path):
     adata.var["gene_ids"] = adata.var.index.values
 
     return(adata)
-    
     

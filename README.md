@@ -1,78 +1,144 @@
-# PySingleCellNet
-singleCellNet in Python
-### Introduction
 
-This is a python package for singleCellNet that accomplishes the same tasks as the original version written in R. Unlike the R version, which takes an expression matrix and sample table as inputs, PySingleCellNet requires that all information be stored in an AnnData object. The expression matrix is in the form n_obs x n_vars, where gene info is stored in variables and cell info is stored in objects. For more information on working with AnnData objects, see the documentation [here](https://anndata.readthedocs.io/en/latest/anndata.AnnData.html). 
+# pySingleCellNet Vignette
 
-#### Installing required packages
+## Introduction 
+This is a python package for singleCellNet that accomplishes the same tasks as the original version written in R and can be found at https://github.com/pcahan1/SingleCellNet/.
+
 PySingleCellNet makes use of the following packages:
-- scanpy
-- rpy2
-- numpy
+
 - pandas
+- numpy
 - sklearn
+- scanpy
+- sklearn
+- statsmodels
+- scipy
+- matplotlib
+- seaborn
+- umap-learn
 
 Make sure these packages are installed on your machine prior to using PySingleCellNet.
 
-#### Using PySingleCellNet
-Once all necessary packages and PySingleCellNet are installed, import the necesary packages
+## Installing pySCN
+
+
 ```python
-import PySingleCellNet as pscn
-import scanpy as sc
+!pip install git+https://github.com/pcahan1/PySingleCellNet/
 ```
 
-#### Converting from .rda expression matrix and sample table to AnnData object
-If your data is stored in .rda files, you will first need to convert them to an AnnData object with the following code. Expression matrix will be stored in adata.X, gene info will be stored in adata.var, and all cell info, including meta data, will be stored in adata.obs
-```python
-expMat_file = 'fileNameForExpMat.rda'
-sampTab_file = 'fileNameForSampTab.rda'
-filepath = 'locationOfFiles'
-adata = pscn.ut.convertRDAtoAdata(expMat_file, sampTab_file, filepath)
-```
-### Training the SCN classifier
-#### Load data
+## Importing pySCN, pandas and numpy
 
 
-#### Find genes in common between training and query datasets and limit analysis to these genes
 ```python
-commonGenes = np.intersect1d(aTrain.var.index, aQuery.var.index, assume_unique = True)
-aTrain = aTrain[: ,aTrain.var.index == commonGenes]
+import pySingleCellNet as pySCN
+import pandas as pd
+import numpy as np
 ```
 
-#### Split for training and assessment, transform the training data
-```python
-aList = pscn.ut.splitCommon(aTrain, ncells = 100, dLevel = "newAnn")
-aTrain2 = aList[0]
+## Load in training data 
+#### (subset of Tabula Muris data is used here, available at https://github.com/pcahan1/SingleCellNet/)
+#### *can also extract data from AnnData object using makeExpMat and makeSampMat functions
 
-sc.pp.normalize_per_cell(aTrain2, counts_per_cell_after = 1e5)
+
+```python
+tmData=pd.read_csv("tm10xSubExpDat.csv", index_col=0)
+tmSampTab=pd.read_csv("tm10xSubSampTab.csv", index_col=0)
+tmSampTab.newAnn= tmSampTab.newAnn.astype(str)
 ```
 
-#### Find the best set of classifier genes
-```python
-cgenes2 = pscn.tr.findClassyGenes(aTrain2, dLevel = "newAnn", topX = 10)
+## Split data into training and validation
 
-#limit analysis to these genes
-aTrain2 = aTrain2[:, aTrain2.var.index == cgenes2]
+
+```python
+expTrain, expVal = pySCN.splitCommon(expData=tmData, ncells=100,sampTab=tmSampTab, dLevel="newAnn")
+stTrain=tmSampTab.loc[expTrain.index,:]
+stVal=tmSampTab.loc[expVal.index,:]
+```    
+
+# Train pySCN
+
+
+```python
+[cgenesA, xpairs, tspRF]= pySCN.scn_train(stTrain = stTrain, expTrain = expTrain,
+                   nTopGenes = 10, nRand = 70, nTrees = 1000,nTopGenePairs = 25, dLevel = "newAnn", stratify=True)
 ```
 
-#### Find the top gene pairs and transform the data. This section of code is not yet functional. 
+## Apply to held-out Data
+
+
 ```python
-xpairs = pscn.tr.ptGetTop(aTrain2, dLevel = "newAnn", topX = 50, sliceSize = 5000)
-pdTrain = pscn.query_transform(aTrain2, xpairs)
+classResVal= pySCN.scn_predict(cgenesA, xpairs, tspRF, expVal, nrand = 0)
 ```
 
-#### Train the classifier. This section of code is not yet functional
-Returns a RandomForest object from the sklearn.ensemble package
+## Assess Classifier
+
+
 ```python
-rf_tspAll = pscn.tr.sc_makeClassifier(pdTrain, genes = xpairs, groups = "newAnn", nrand = 50, ntrees = 1000)
+tm_heldoutassessment = pySCN.assess_comm(classResVal, stTrain, stVal, resolution = 0.005, nRand = 0, dLevelSID = "cell", classTrain = "newAnn", classQuery = "newAnn")
 ```
 
-#### Apply to held out data
+## Generate classifier assessment plots
+
+
 ```python
-aTest = aList[1]
-
-aQueryTransform = pscn.qt.query_transform(aTest[:, aTest.var.index == cgenes2], xpairs)
-
-classRes = rf_tspAll.predict_proba(aQueryTransform)
+pySCN.plot_PRs(tm_heldoutassessment)
 ```
 
+
+![png](md_img/output_17_0.png)
+
+
+
+```python
+pySCN.plot_metrics(tm_heldoutassessment)
+```
+
+
+![png](md_img/output_18_0.png)
+
+
+## Plot the classification clustermap, violin plot and attribution plot 
+
+
+```python
+pySCN.sc_hmClass(classResVal.loc[stVal.index,:], stVal["newAnn"],cRow=False,cCol=False)
+```
+
+
+![png](md_img/output_20_0.png)
+
+
+
+```python
+pySCN.sc_violinClass(stVal, classResVal, threshold=0.5, dLevel="newAnn", ncol=4 )
+```
+
+
+![png](md_img/output_21_0.png)
+
+
+
+```python
+pySCN.plot_attr(classResVal, stVal, "newAnn")
+```
+
+
+![png](md_img/output_22_0.png)
+
+
+## Assign classification from pySCN, add it to sample table and plot UMAP of validation data colored by classifcation category 
+
+
+```python
+stVal = pySCN.get_cate(classResVal, stVal, cThresh = 0)
+pySCN.plot_umap(expVal, stVal, dLevel="category")
+```
+
+
+![png](md_img/output_24_0.png)
+
+
+
+```python
+
+```
