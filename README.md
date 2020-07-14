@@ -25,34 +25,41 @@ import numpy as np
 ```
 
 #### Load in training data 
-subset of Tabula Muris data is used here, available at https://github.com/pcahan1/SingleCellNet/
-*can also extract data from AnnData object using makeExpMat and makeSampMat functions
-
+A subset of Tabula Muris data is used. Data can be found [here](https://github.com/pcahan1/SingleCellNet/)
 ```python
-tmData=pd.read_csv("tm10xSubExpDat.csv", index_col=0)
-tmSampTab=pd.read_csv("tm10xSubSampTab.csv", index_col=0)
-tmSampTab.newAnn= tmSampTab.newAnn.astype(str)
+tmData = pd.read_csv("tm10xSubExpDat.csv", index_col=0)
+tmSampTab = pd.read_csv("tm10xSubSampTab.csv", index_col=0)
+tmSampTab.newAnn = tmSampTab.newAnn.astype(str)
+```
+
+If you are working with an annData object, you can also extract data from AnnData object using makeExpMat and makeSampMat functions
+```python
+annData = convertRDAtoAdata(expMat_file = "tm10xSubexpDat.rda",sampTab_file = "m10xSubSampTab.rda", file_path = ".")
+
+tmData = makeExpMat(annData)
+tmSampTab = makeSampTab(annData)
+tmSampTab.newAnn = tmSampTab.newAnn.astype(str)
 ```
 
 #### Split data into training and validation
 
 ```python
 expTrain, expVal = pySCN.splitCommon(expData=tmData, ncells=100,sampTab=tmSampTab, dLevel="newAnn")
-stTrain=tmSampTab.loc[expTrain.index,:]
-stVal=tmSampTab.loc[expVal.index,:]
+stTrain = tmSampTab.loc[expTrain.index,:]
+stVal = tmSampTab.loc[expVal.index,:]
 ```    
 
 #### Train pySCN classifier
 
 ```python
-[cgenesA, xpairs, tspRF]= pySCN.scn_train(stTrain = stTrain, expTrain = expTrain,
+[cgenesA, xpairs, tspRF] = pySCN.scn_train(stTrain = stTrain, expTrain = expTrain,
                    nTopGenes = 10, nRand = 70, nTrees = 1000,nTopGenePairs = 25, dLevel = "newAnn", stratify=True)
 ```
 
 #### Apply to held-out Data
 
 ```python
-classResVal= pySCN.scn_predict(cgenesA, xpairs, tspRF, expVal, nrand = 0)
+classResVal = pySCN.scn_predict(cgenesA, xpairs, tspRF, expVal, nrand = 0)
 ```
 
 #### Assess pySCN classifier
