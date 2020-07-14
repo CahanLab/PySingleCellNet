@@ -25,9 +25,8 @@ import numpy as np
 ```
 
 #### Load in training data 
-#### (subset of Tabula Muris data is used here, available at https://github.com/pcahan1/SingleCellNet/)
-#### *can also extract data from AnnData object using makeExpMat and makeSampMat functions
-
+subset of Tabula Muris data is used here, available at https://github.com/pcahan1/SingleCellNet/
+*can also extract data from AnnData object using makeExpMat and makeSampMat functions
 
 ```python
 tmData=pd.read_csv("tm10xSubExpDat.csv", index_col=0)
@@ -86,7 +85,6 @@ pySCN.sc_hmClass(classResVal.loc[stVal.index,:], stVal["newAnn"],cRow=False,cCol
 pySCN.sc_violinClass(stVal, classResVal, threshold=0.5, dLevel="newAnn", ncol=4 )
 ```
 ![png](md_img/output_21_0.png)
-
 
 ```python
 pySCN.plot_attr(classResVal, stVal, "newAnn")
