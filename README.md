@@ -40,7 +40,7 @@ tmSampTab = pd.read_csv("tm10xSubSampTab.csv", index_col=0)
 tmSampTab.newAnn = tmSampTab.newAnn.astype(str)
 ```
 
-If you are working with an annData object, you can also extract data from AnnData object using makeExpMat and makeSampMat functions
+##### If you are working with an annData object, you can also extract data from AnnData object using makeExpMat and makeSampMat functions
 ```python
 annData = convertRDAtoAdata(expMat_file = "tm10xSubexpDat.rda",sampTab_file = "tm10xSubSampTab.rda", file_path = ".")
 
