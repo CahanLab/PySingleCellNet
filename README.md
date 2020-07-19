@@ -28,7 +28,7 @@ import numpy as np
 A subset of Tabula Muris data is used. 
 | DATA TYPE | METADATA | EXPRESSION |
 |-------------|----------|------------|
-| csv       | [metadata](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubSampTab.csv | [expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubExpDat.csv) |
+| csv       | [metadata](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubSampTab.csv) | [expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubExpDat.csv) |
 | rda    | [metadata](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubSampTab.rda) | [expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubExpDat.rda) |
 
 More reference datasets can be found [here](https://github.com/pcahan1/SingleCellNet/)
