@@ -25,7 +25,14 @@ import numpy as np
 ```
 
 #### Load in training data 
-A subset of Tabula Muris data is used. Data can be found [here](https://github.com/pcahan1/SingleCellNet/)
+A subset of Tabula Muris data is used. 
+| DATA TYPE | METADATA | EXPRESSION |
+|-------------|----------|------------|
+| csv       | [metadata](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubSampTab.csv | [expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubExpDat.csv) |
+| rda    | [metadata](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubSampTab.rda) | [expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/examples/tm10xSubExpDat.rda) |
+
+More reference datasets can be found [here](https://github.com/pcahan1/SingleCellNet/)
+
 ```python
 tmData = pd.read_csv("tm10xSubExpDat.csv", index_col=0)
 tmSampTab = pd.read_csv("tm10xSubSampTab.csv", index_col=0)
