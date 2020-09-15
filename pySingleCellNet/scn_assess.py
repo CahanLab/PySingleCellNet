@@ -7,7 +7,6 @@ from .scn_train import *
 import matplotlib
 import matplotlib.pyplot as plt
 
-def divide_sampTab(sampTab, prop, dLevel="cell_ontology_class"):
     cts = set(sampTab[dLevel])
     trainingids = np.empty(0)
     for ct in cts:
@@ -97,7 +96,9 @@ def cn_classAssess(ct_scores, stVal, classLevels="description2", dLevelSID="samp
         i = i + 1;
     return allROCs;
 
-def assess_comm(ct_scores, stTrain, stQuery, resolution = 0.005, nRand = 50, dLevelSID = "sample_name", classTrain = "cell_ontology_class", classQuery = "description2"):
+def assess_comm(ct_scores, aTrain, aQuery, resolution = 0.005, nRand = 50, dLevelSID = "sample_name", classTrain = "cell_ontology_class", classQuery = "description2"):
+    stTrain= aTrain.obs
+    stQuery= aQuery.obs
     shared_cell_type = np.intersect1d(np.unique(stTrain[classTrain]), np.unique(stQuery[classQuery]))
     stVal_com = stQuery.loc[np.isin(stQuery[classQuery], shared_cell_type),:]
     if(nRand > 0):
