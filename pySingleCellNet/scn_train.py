@@ -5,6 +5,7 @@ import warnings
 from .utils import *
 from .tsp_rf import *
 
+
 def randomize(expDat, num=50):
     temp=expDat.to_numpy()
     temp=np.array([np.random.choice(x, len(x), replace=False) for x in temp])
@@ -12,9 +13,12 @@ def randomize(expDat, num=50):
     temp=np.array([np.random.choice(x, len(x), replace=False) for x in temp]).T
     return pd.DataFrame(data=temp, columns=expDat.columns).iloc[0:num,:]
 
-def sc_trans_rnaseq(expDat,total,dThresh=0):
-    expCountDnW=expDat.apply(downSampleW, args=(total, dThresh ), axis=1)
-    return np.log(1+expCountDnW)
+def sc_trans_rnaseq(aDat,total = 10000 ):
+    sc.pp.normalize_per_cell(aDat, counts_per_cell_after=total)
+    sc.pp.log1p(aDat)
+    sc.pp.scale(aDat, max_value=10)
+    #return np.log(1+expCountDnW)
+    return aDat
 
 def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=False):
     randDat = randomize(expTrain, num=nRand)
@@ -30,21 +34,23 @@ def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=F
     clf.fit(expT.loc[:,ggenes].to_numpy(), ggroups)
     return clf
 
-def scn_train(stTrain,expTrain,dLevel,nTopGenes = 10,nTopGenePairs = 25,nRand = 70,nTrees = 1000,stratify=False, weightedDown_total = 10000, weightedDown_dThresh = 0.25):
+def scn_train(aTrain,dLevel,nTopGenes = 10,nTopGenePairs = 25,nRand = 70,nTrees = 1000,stratify=False, weightedDown_total = 10000, weightedDown_dThresh = 0.25):
     warnings.filterwarnings('ignore')
-    expTnorm= sc_trans_rnaseq(expTrain, weightedDown_total, dThresh= weightedDown_dThresh)
+    stTrain= aTrain.obs
+    expTnorm= pd.DataFrame(data=aTrain.X,  index= aTrain.obs.index.values, columns= aTrain.var.index.values)
     expTnorm=expTnorm.loc[stTrain.index.values]
     print("Matrix normalized")
     cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
     print("There are ", len(cgenesA), " classification genes\n")
-    xpairs= ptGetTop(expTrain.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
+    xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
     print("There are", len(xpairs), "top gene pairs\n")
-    pdTrain= query_transform(expTrain.loc[:,cgenesA], xpairs)
+    pdTrain= query_transform(expTnorm.loc[:,cgenesA], xpairs)
     print("Finished pair transforming the data\n")
     tspRF=sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees, stratify=stratify)
     return [cgenesA, xpairs, tspRF]
 
-def scn_predict(cgenes, xpairs, rf_tsp, expDat, nrand = 2):
+def scn_predict(cgenes, xpairs, rf_tsp, aDat, nrand = 2, weightedDown_total = 10000, weightedDown_dThresh = 0.25):
+    expDat= pd.DataFrame(data=aDat.X, index= aDat.obs.index.values, columns= aDat.var.index.values)
     expValTrans=query_transform(expDat.reindex(labels=cgenes, axis='columns', fill_value=0), xpairs)
     classRes_val=rf_classPredict(rf_tsp, expValTrans, numRand=nrand)
     return classRes_val
