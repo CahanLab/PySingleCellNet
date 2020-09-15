@@ -7,6 +7,8 @@ from .scn_train import *
 import matplotlib
 import matplotlib.pyplot as plt
 
+
+def divide_sampTab(sampTab, prop, dLevel="cell_ontology_class"):
     cts = set(sampTab[dLevel])
     trainingids = np.empty(0)
     for ct in cts:
