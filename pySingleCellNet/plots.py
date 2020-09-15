@@ -6,13 +6,13 @@ import seaborn as sns
 import warnings
 import umap
 
+
 def sc_hmClass(classMat, grps,cRow=False,cCol=False):
-    warnings.filterwarnings('ignore')
     g_uni=np.unique(grps)
     my_palette = dict(zip(g_uni, sns.color_palette("hls",len(g_uni))))
     col_colors = grps.map(my_palette)
     if cRow:
-        g=sns.clustermap(classMat.T, row_cluster=cRow, col_cluster=cCol, standard_scale=1, col_colors=col_colors, cmap="viridis",  cbar_kws={"orientation": "horizontal"})
+        g=sns.clustermap(classMat.T, row_cluster=cRow, col_cluster=cCol, standard_scale=1, col_colors=col_colors, cmap="viridis",  cbar_kws={"orientation": "horizontal"})   
     else:
         g=sns.clustermap(classMat.T, row_cluster=cRow, col_cluster=cCol, standard_scale=1, col_colors=col_colors, cmap="viridis")
     g.gs.update(left=0.00, right=0.6)
@@ -36,12 +36,12 @@ def sc_hmClass(classMat, grps,cRow=False,cCol=False):
         g.cax.set_position([0.125, 0.775, .475, .02])
     else:
         g.cax.set_position([0, 0.125, .03, .575])
-
+    
     plt.tight_layout()
     plt.show()
 
-def sc_violinClass(sampTab, classRes, dLevel="cluster", threshold=0.20,  ncol =1, sub_cluster=[] ):
-    warnings.filterwarnings('ignore')
+def sc_violinClass(aData, classRes, dLevel="cluster", threshold=0.20,  ncol =1, sub_cluster=[] ):
+    sampTab= adata.obs.copy()
     maxes=classRes.apply(np.max, axis=0)
     temp=classRes.loc[:, maxes>=threshold]
     grps_uni=np.unique(sampTab[dLevel])
@@ -75,8 +75,8 @@ def sc_violinClass(sampTab, classRes, dLevel="cluster", threshold=0.20,  ncol =1
     space.axis("off")
     space.legend(handles, labels, loc= "center left")
 
-def plot_attr(classRes, sampTab, dLevel, sub_cluster = []):
-    warnings.filterwarnings('ignore')
+def plot_attr(classRes, aData, dLevel, sub_cluster = []):
+    sampTab= adata.obs.copy()
     if sub_cluster !=[]:
         temp=pd.concat([sampTab.newAnn.loc[sampTab[dLevel].isin(sub_cluster)], classRes.loc[sampTab[dLevel].isin(sub_cluster),:].idxmax(axis=1)], axis=1)
     else:
@@ -87,10 +87,21 @@ def plot_attr(classRes, sampTab, dLevel, sub_cluster = []):
     temp.set_index('newAnn').plot(kind='barh', stacked=True, figsize=(10,8))
     plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), ncol=2)
     plt.tight_layout()
-
-def plot_umap(expMat, sampTab, dLevel="category"):
-    standard_embedding = umap.UMAP(random_state=42).fit_transform(expMat.values)
-    dat = pd.DataFrame(standard_embedding, index=expMat.index)
+    
+def get_cate(classRes, aData, cThresh = 0):
+    res=classRes.idxmax(axis=1)
+    if cThresh>0:
+        for i in range(0, len(res)):
+            if classRes.loc[res.index[i], res[i]]<cThresh:
+                res[i]="rand"
+    st=adata.obs.copy()
+    st["category"]=res
+    return st
+    
+def plot_umap(aData, dLevel="category"):
+    sampTab= adata.obs.copy()
+    standard_embedding = umap.UMAP(random_state=42).fit_transform(aData.X)
+    dat = pd.DataFrame(standard_embedding, index=aData.obs.index)
     dat = pd.concat([dat, sampTab[dLevel]], axis=1)
     dat.columns = ["component 1","component 2", "class"]
     grps=np.unique(dat["class"])
@@ -99,13 +110,3 @@ def plot_umap(expMat, sampTab, dLevel="category"):
     plt.xlabel("Component 1")
     plt.ylabel("Component 2")
     plt.legend(loc="center left", ncol=2, bbox_to_anchor=(1, 0.5))
-
-def get_cate(classRes, sampTab, cThresh = 0):
-    res=classRes.idxmax(axis=1)
-    if cThresh>0:
-        for i in range(0, len(res)):
-            if classRes.loc[res.index[i], res[i]]<cThresh:
-                res[i]="rand"
-    st=sampTab.copy()
-    st["category"]=res
-    return st
