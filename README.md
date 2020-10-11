@@ -30,6 +30,7 @@ To illustrate how you might use SCN to perform cell tying, we apply it to anothe
 
 <cite>Angelidis I, Simon LM, Fernandez IE, Strunz M et al. An atlas of the aging lung mapped by single cell transcriptomics and deep tissue proteomics. Nat Commun 2019 Feb 27;10(1):963. PMID: 30814501</cite>
 
+You will need to decompress this file prior to loading it:
 [Query expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx)
 
 [Query meta-data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_Angelidis_2018_metadata.csv)
