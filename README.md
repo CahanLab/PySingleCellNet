@@ -23,7 +23,7 @@ Below is a brief tutorial that shows you how to use SCN. In this example, we tra
 #### Training data
 SCN has to be trainined on well-annotated reference data. In this example, we use data geernated as part of the Tabula Muris (Senis) project. Specifically, we use the droplet lung data. We have compiled several other training data sets as listed below. 
 
-[Lung training data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/training/adLung_TabSen_100920.h5ad)
+[Lung training data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adLung_Angelidis_100920.h5ad)
 
 #### Query data
 To illustrate how you might use SCN to perform cell tying, we apply it to another dataset from mouse lung:
@@ -31,11 +31,11 @@ To illustrate how you might use SCN to perform cell tying, we apply it to anothe
 <cite>Angelidis I, Simon LM, Fernandez IE, Strunz M et al. An atlas of the aging lung mapped by single cell transcriptomics and deep tissue proteomics. Nat Commun 2019 Feb 27;10(1):963. PMID: 30814501</cite>
 
 You will need to decompress this file prior to loading it:
-[Query expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx)
+[Query expression data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx.gz)
 
-[Query meta-data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_Angelidis_2018_metadata.csv)
+[Query meta-data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/query/GSE124872_Angelidis_2018_metadata.csv)
 
-[Query gene list](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/genes.csv)
+[Query gene list](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/query/genes.csv)
 
 ##### Initialize session
 
