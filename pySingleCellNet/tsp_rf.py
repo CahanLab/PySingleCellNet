@@ -4,6 +4,9 @@ from sklearn import linear_model
 from itertools import combinations
 from .stats import * 
 
+### from stats import * 
+
+
 def csRenameOrth(expQuery,expTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
     _,_,cgenes=np.intersect1d(expQuery.columns.values, orthTable[speciesQuery], return_indices=True)
     _,_,ccgenes=np.intersect1d(expTrain.columns.values, orthTable[speciesTrain], return_indices=True)
@@ -204,3 +207,5 @@ def findClassyGenes(expDat, sampTab,dLevel, topX=25, dThresh=0, alpha1=0.05,alph
         res.append(temp)
     cgenes2=np.unique(np.array(res).flatten())
     return [cgenes2, grps, cgenes]
+
+    

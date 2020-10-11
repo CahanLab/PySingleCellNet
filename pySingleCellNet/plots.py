@@ -5,6 +5,50 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 import umap
+import anndata as ad
+
+
+
+def sc_hmScanpy(adata, categories, groupBy='leiden'):
+    ctAll = adata.obs.columns.values[categories]
+    var = pd.DataFrame(index = ctAll)
+
+    #adNew = ad.AnnData(adM1Norm.obs[ctAll], obs=adM1Norm.obs, var=var)
+    #ax = sc.pl.heatmap(adNew, ctAll, groupby='leiden', cmap='viridis', dendrogram=True, swap_axes=True)
+
+
+def My_sc_hmClass(classMat, grps,cRow=False,cCol=False):
+    warnings.filterwarnings('ignore')
+    g_uni=np.unique(grps)
+    my_palette = dict(zip(g_uni, sns.color_palette("hls",len(g_uni))))
+    col_colors = grps.map(my_palette)
+    if cRow:
+        g=sns.clustermap(classMat.T, row_cluster=cRow, col_cluster=cCol, standard_scale=None, col_colors=col_colors, cmap="viridis",  cbar_kws={"orientation": "horizontal"})
+    else:
+        g=sns.clustermap(classMat.T, row_cluster=cRow, col_cluster=cCol, standard_scale=None, col_colors=col_colors, cmap="viridis")
+    g.gs.update(left=0.00, right=0.6)
+    gs2 = matplotlib.gridspec.GridSpec(1,1, left=0.925, right=1)
+    ax2 = g.fig.add_subplot(gs2[0])
+    ax2.grid(False)
+    ax2.axis("off")
+    ax = g.ax_heatmap
+    ax.set_yticks(np.arange(len(classMat.columns.values)))
+    ax.set_yticklabels(classMat.columns.values)
+    ax.set_xticks([])
+    for label in g_uni:
+        g.ax_col_dendrogram.bar(0, 0, color=my_palette[label],
+                                label=label, linewidth=0)
+    handles, labels =  g.ax_col_dendrogram.get_legend_handles_labels()
+    lgd=ax2.legend(handles, labels, loc="center left", ncol=2,bbox_to_anchor=(0, 0.4), frameon=False)
+    if cCol and cRow:
+        g.cax.set_position([0, 0.7, .015, .1])
+    elif cRow:
+        g.cax.set_position([0.125, 0.775, .475, .02])
+    else:
+        g.cax.set_position([0, 0.125, .03, .575])    
+    plt.tight_layout()
+    plt.show()
+
 
 
 def sc_hmClass(classMat, grps,cRow=False,cCol=False):
@@ -88,6 +132,16 @@ def plot_attr(classRes, aData, dLevel, sub_cluster = []):
     plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), ncol=2)
     plt.tight_layout()
     
+def plot_attr2(adata, dLevel):
+    temp= adata.obs.copy()
+    temp.columns=[dLevel, "class"]
+    temp=pd.DataFrame(sampTab.pivot_table(index=dLevel, columns='category', aggfunc='size', fill_value=0).to_records())
+    temp.iloc[:, 1:]=temp.iloc[:, 1:].div(temp.iloc[:, 1:].sum(axis=1), axis=0)
+    temp.set_index('newAnn').plot(kind='barh', stacked=True, figsize=(10,8))
+    plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5), ncol=2)
+    plt.tight_layout()
+
+
 def get_cate(classRes, aData, cThresh = 0):
     res=classRes.idxmax(axis=1)
     if cThresh>0:

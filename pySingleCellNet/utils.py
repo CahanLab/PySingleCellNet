@@ -17,7 +17,7 @@ def ctRename(sampTab, annCol, oldName, newName):
     return newSampTab
 
 #adapted from Sam's code
-def splitCommonAnnData(adata, ncells, dLevel="cell_ontology_class", cells_reserved = 3):
+def splitCommonAnnData(adata, ncells, dLevel="cell_ontology_class", cellid = "cell", cells_reserved = 3):
     cts = set(adata.obs[dLevel])
     trainingids = np.empty(0)
     for ct in cts:
@@ -26,11 +26,11 @@ def splitCommonAnnData(adata, ncells, dLevel="cell_ontology_class", cells_reserv
         ccount = aX.n_obs - cells_reserved
         ccount = min([ccount, ncells])
         print(aX.n_obs)
-        trainingids = np.append(trainingids, np.random.choice(aX.obs["sample_name"].values, ccount, replace = False))
+        trainingids = np.append(trainingids, np.random.choice(aX.obs[cellid].values, ccount, replace = False))
 
-    val_ids = np.setdiff1d(adata.obs["sample_name"].values, trainingids, assume_unique = True)
-    aTrain = adata[np.isin(adata.obs["sample_name"], trainingids, assume_unique = True),:]
-    aTest = adata[np.isin(adata.obs["sample_name"], val_ids, assume_unique = True),:]
+    val_ids = np.setdiff1d(adata.obs[cellid].values, trainingids, assume_unique = True)
+    aTrain = adata[np.isin(adata.obs[cellid], trainingids, assume_unique = True),:]
+    aTest = adata[np.isin(adata.obs[cellid], val_ids, assume_unique = True),:]
     return([aTrain, aTest])
 
 def splitCommon(expData, ncells,sampTab, dLevel="cell_ontology_class", cells_reserved = 3):

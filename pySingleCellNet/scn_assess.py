@@ -98,9 +98,15 @@ def cn_classAssess(ct_scores, stVal, classLevels="description2", dLevelSID="samp
         i = i + 1;
     return allROCs;
 
-def assess_comm(ct_scores, aTrain, aQuery, resolution = 0.005, nRand = 50, dLevelSID = "sample_name", classTrain = "cell_ontology_class", classQuery = "description2"):
-    stTrain= aTrain.obs
+
+def assess_comm2(aTrain, aQuery, resolution = 0.005, nRand = 50, dLevelSID = "sample_name", classTrain = "cell_ontology_class", classQuery = "description2"):
+
+#    ct_scores = 
+    ct_scores = pd.DataFrame(aQuery.X, index = aQuery.obs[dLevelSID], columns = aQuery.var.index)
+ #   ct_scores = pd.DataFrame(ct_scores, index=aQuery.obs.index, columns = aQuery.obs.columns.)
     stQuery= aQuery.obs
+    stTrain= aTrain.obs
+    
     shared_cell_type = np.intersect1d(np.unique(stTrain[classTrain]), np.unique(stQuery[classQuery]))
     stVal_com = stQuery.loc[np.isin(stQuery[classQuery], shared_cell_type),:]
     if(nRand > 0):
@@ -111,15 +117,45 @@ def assess_comm(ct_scores, aTrain, aQuery, resolution = 0.005, nRand = 50, dLeve
         tmp.index= tmp[dLevelSID]
         stVal_com= pd.concat([stVal_com, tmp])
     cells_sub = stVal_com[dLevelSID]
+
+    ct_score_com = ct_scores.loc[cells_sub,:]
+    return ct_score_com
+
+
+def assess_comm(aTrain, aQuery, resolution = 0.005, nRand = 50, dLevelSID = "sample_name", classTrain = "cell_ontology_class", classQuery = "description2"):
+
+#    ct_scores = 
+    ct_scores = pd.DataFrame(aQuery.X, index = aQuery.obs[dLevelSID], columns = aQuery.var.index)
+ #   ct_scores = pd.DataFrame(ct_scores, index=aQuery.obs.index, columns = aQuery.obs.columns.)
+    stQuery= aQuery.obs
+    stQuery.index = ct_scores.index
+    stTrain= aTrain.obs
+
+    
+    shared_cell_type = np.intersect1d(np.unique(stTrain[classTrain]), np.unique(stQuery[classQuery]))
+    stVal_com = stQuery.loc[np.isin(stQuery[classQuery], shared_cell_type),:]
+    if(nRand > 0):
+        tmp = np.empty([nRand, len(stVal_com.columns)], dtype=np.object)
+        tmp[:]="rand"
+        tmp=pd.DataFrame(data=tmp, columns=stVal_com.columns.values )
+        tmp[dLevelSID] = ct_scores.index.values[(len(ct_scores.index) - nRand):len(ct_scores.index)]
+        tmp.index= tmp[dLevelSID]
+        stVal_com= pd.concat([stVal_com, tmp])
+    cells_sub = stVal_com[dLevelSID]
+
     ct_score_com = ct_scores.loc[cells_sub,:]
     report= {}
+
     ct_scores_t = ct_score_com.T
     true_label = stVal_com[classQuery]
+
     y_true=true_label.str.get_dummies()
     eps = 1e-15
     y_pred = np.maximum(np.minimum(ct_scores, 1 - eps), eps)
+
     multiLogLoss = (-1 / len(ct_scores_t.index)) * np.sum(np.matmul(y_true.T.values, np.log(y_pred.values)))
     pred_label = ct_scores.idxmax(axis=1)
+
     cm=pd.crosstab(true_label, pred_label)
     #in case of misclassfication where there are classifiers that are not used
     if (len(np.setdiff1d(np.unique(true_label), np.unique(pred_label))) != 0):
@@ -128,12 +164,14 @@ def assess_comm(ct_scores, aTrain, aQuery, resolution = 0.005, nRand = 50, dLeve
             added = pd.DataFrame(np.zeros([len(cm.index), 1]), index=cm.index)
             cm = pd.concat([cm, added], axis=1)
         cm.columns.values[(len(cm.columns) - len(misCol)) : len(cm.columns)] = misCol
+
     if (len(np.setdiff1d(np.unique(pred_label), np.unique(true_label))) != 0):
         misRow = np.setdiff1d(np.unique(pred_label), np.unique(true_label))
         for i in range(0, len(misRow)):
             added = pd.DataFrame(np.zeros([1, len(cm.columns)]), columns= cm.columns)
             cm = pd.concat([cm, added], axis=0)
         cm.index.values[(len(cm.index) - len(misRow)) : len(cm.index)] = misRow
+
     cm= cm.loc[cm.index.values,:]
     n = np.sum(np.sum(cm))
     nc = len(cm.index)
@@ -144,6 +182,7 @@ def assess_comm(ct_scores, aTrain, aQuery, resolution = 0.005, nRand = 50, dLeve
     q = colsums / n
     expAccuracy = np.dot(p,q)
     accuracy = np.sum(diag) / n
+
     confusionMatrix = cn_classAssess(ct_score_com, stVal_com, classLevels= classQuery, dLevelSID=dLevelSID, resolution=resolution)
     PR_ROC = cal_class_PRs(confusionMatrix)
     nonNA_PR = PR_ROC.dropna(subset=['recall'], axis="rows").copy()
