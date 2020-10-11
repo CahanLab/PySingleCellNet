@@ -110,7 +110,7 @@ expTrain, expVal = pySCN.splitCommonAnnData(adTrain1, ncells=200,dLevel="cell_on
 ``` python
 adVal = pySCN.scn_classify(expVal, cgenesA, xpairs, tspRF, nrand = 0)
 
-ax = sc.pl.heatmap(adVal, adVal.var_names.values, groupby='category', cmap='viridis', dendrogram=False, swap_axes=True)
+ax = sc.pl.heatmap(adVal, adVal.var_names.values, groupby='SCN_class', cmap='viridis', dendrogram=False, swap_axes=True)
 ```
 ![png](md_img/HM_Val_Lung_100920.png)
 
@@ -126,11 +126,11 @@ plt.show()
 ![png](md_img/PR_curves_Lung_100920.png)
 
 
-##### Classify the independent query data and visualize. The heatmap groups the cells according to the cell type with the maximum SCN classification score. Cells in the 'rand' category have a higher SCN score in the 'random' category than any cell type from the training data.
+##### Classify the independent query data and visualize. The heatmap groups the cells according to the cell type with the maximum SCN classification score. Cells in the 'rand' SCN_class or category have a higher SCN score in the 'random' SCN_class than any cell type from the training data.
 ```python
 adQlung = pySCN.scn_classify(adQuery, cgenesA, xpairs, tspRF, nrand = 0)
 
-ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='celltype', cmap='viridis', dendrogram=False, swap_axes=True)
+ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='SCN_class', cmap='viridis', dendrogram=False, swap_axes=True)
 ```
 
 ![png](md_img/HM_Val_Other_softmax_100920.png)
@@ -142,7 +142,7 @@ ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='celltype', cmap='vi
 
 ![png](md_img/HM_Val_Other_100920.png)
 
-##### Add the classification result to the query annData object. We add the SCN scores as well as the softmax classification (i.e. a label corresponding to the cell type with the maximum SCN score -- this goes in adata.obs["category"]). 
+##### Add the classification result to the query annData object. We add the SCN scores as well as the softmax classification (i.e. a label corresponding to the cell type with the maximum SCN score -- this goes in adata.obs["SCN_class"]). 
 ```python
 pySCN.add_classRes(adQuery, adQlung)
 ```
@@ -173,7 +173,7 @@ npcs = 20
 sc.pp.neighbors(adM1Norm, n_neighbors=10, n_pcs=npcs)
 sc.tl.leiden(adM1Norm,.1)
 sc.tl.umap(adM1Norm, .5)
-sc.pl.umap(adM1Norm, color=["leiden", "category"], alpha=.9, s=15, legend_loc='on data')
+sc.pl.umap(adM1Norm, color=["leiden", "SCN_class"], alpha=.9, s=15, legend_loc='on data')
 ```
 
 ![png](md_img/UMAP_Lung_Other_101120.png)

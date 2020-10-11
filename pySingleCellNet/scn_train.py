@@ -74,14 +74,16 @@ def scn_classify(adata, cgenes, xpairs, rf_tsp, nrand = 0 ):
     classRes = scn_predict(cgenes, xpairs, rf_tsp, adata, nrand = nrand)
     categories = classRes.columns.values
     adNew = ad.AnnData(classRes, obs=adata.obs, var=pd.DataFrame(index=categories))
-    adNew.obs['category'] =  classRes.idxmax(axis=1)
+    # adNew.obs['category'] =  classRes.idxmax(axis=1)
+    adNew.obs['SCN_class'] =  classRes.idxmax(axis=1)
     return adNew
 
 def add_classRes(adata: AnnData, adClassRes, copy=False) -> AnnData:
     cNames = adClassRes.var_names
     for cname in cNames:
         adata.obs[cname] = adClassRes[:,cname].X
-    adata.obs['category'] = adClassRes.obs['category']
+    # adata.obs['category'] = adClassRes.obs['category']
+    adata.obs['SCN_class'] = adClassRes.obs['SCN_class']
     return adata if copy else None
 
 
