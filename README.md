@@ -23,18 +23,18 @@ Below is a brief tutorial that shows you how to use SCN. In this example, we tra
 #### Training data
 SCN has to be trainined on well-annotated reference data. In this example, we use data geernated as part of the Tabula Muris (Senis) project. Specifically, we use the droplet lung data. We have compiled several other training data sets as listed below. 
 
-[Lung training data]("https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/training/adLung_TabSen_100920.h5ad")
+[Lung training data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/training/adLung_TabSen_100920.h5ad)
 
 #### Query data
 To illustrate how you might use SCN to perform cell tying, we apply it to another dataset from mouse lung:
 
-Angelidis I, Simon LM, Fernandez IE, Strunz M et al. An atlas of the aging lung mapped by single cell transcriptomics and deep tissue proteomics. Nat Commun 2019 Feb 27;10(1):963. PMID: 30814501
+<cite>Angelidis I, Simon LM, Fernandez IE, Strunz M et al. An atlas of the aging lung mapped by single cell transcriptomics and deep tissue proteomics. Nat Commun 2019 Feb 27;10(1):963. PMID: 30814501</cite>
 
-[Query expression data]("https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx")
+[Query expression data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx)
 
-[Query meta-data]("https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_Angelidis_2018_metadata.csv")
+[Query meta-data](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/GSE124872_Angelidis_2018_metadata.csv)
 
-[Query gene list]("https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/genes.csv")
+[Query gene list](https://s3.amazonaws.com/cnobjects/singleCellNet/pySCN/query/genes.csv)
 
 ##### Initialize session
 
@@ -191,7 +191,7 @@ ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='leiden', cmap='viri
 sc.pl.umap(adM1Norm, color=["epithelial cell", "stromal cell", "B cell"], alpha=.9, s=15, legend_loc='on data', wspace=.3)
 ```
 
-![png](md_img/UMAP_other_lung_SCN_100920.png)
+![png](md_img/UMAP_Lung_SCN_101120.png)
 
 
 Table of other training data goes here
