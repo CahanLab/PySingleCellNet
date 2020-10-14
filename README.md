@@ -23,12 +23,12 @@ Below is a brief tutorial that shows you how to use SCN. In this example, we tra
 #### Training data
 SCN has to be trainined on well-annotated reference data. In this example, we use data geernated as part of the Tabula Muris (Senis) project. Specifically, we use the droplet lung data. We have compiled several other training data sets as listed below. 
 
-[Lung training data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adLung_Angelidis_100920.h5ad)
+[Lung training data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adLung_TabSen_100920.h5ad)
 
 #### Query data
 To illustrate how you might use SCN to perform cell tying, we apply it to another dataset from mouse lung:
 
-<cite>Angelidis I, Simon LM, Fernandez IE, Strunz M et al. An atlas of the aging lung mapped by single cell transcriptomics and deep tissue proteomics. Nat Commun 2019 Feb 27;10(1):963. PMID: 30814501</cite>
+>Angelidis I, Simon LM, Fernandez IE, Strunz M et al. An atlas of the aging lung mapped by single cell transcriptomics and deep tissue proteomics. Nat Commun 2019 Feb 27;10(1):963. PMID: 30814501
 
 You will need to decompress this file prior to loading it:
 [Query expression data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx.gz)
@@ -56,7 +56,7 @@ sc.logging.print_header()
 import pySingleCellNet as pySCN
 ```
 
-##### Load the training data
+##### Load the training data. You should always start with the raw counts. 
 ```python
 adTrain = sc.read("adLung_TabSen_100920.h5ad")
 adTrain
@@ -64,7 +64,7 @@ adTrain
 
 ```
 
-##### Load the query data
+##### Load the query data. You should always start with the raw counts. If your expression is stored as a numpyt array, you can convert it with the check_adX(adata) function.
 ```python
 qDatT = sc.read_mtx("GSE124872_raw_counts_single_cell.mtx")
 qDat = qDatT.T
@@ -96,7 +96,7 @@ adQuery
 # AnnData object with n_obs × n_vars = 4240 × 16543
 ```
 
-##### Split the reference data inot training and held out
+##### Split the reference data into training data and data held out for later assessment. IDeally, we would assess performance on an indepdendent data.
 ```python
 expTrain, expVal = pySCN.splitCommonAnnData(adTrain1, ncells=200,dLevel="cell_ontology_class")
 ```
@@ -115,7 +115,7 @@ ax = sc.pl.heatmap(adVal, adVal.var_names.values, groupby='SCN_class', cmap='vir
 ![png](md_img/HM_Val_Lung_100920.png)
 
 
-##### Determine how well classifier predicts cell type of held out data and plot
+##### Determine how well the classifier predicts cell type of held out data and plot
 ```python
 assessment =  pySCN.assess_comm(expTrain, adVal, resolution = 0.005, nRand = 0, dLevelSID = "cell", classTrain = "cell_ontology_class", classQuery = "cell_ontology_class")
 
@@ -126,7 +126,7 @@ plt.show()
 ![png](md_img/PR_curves_Lung_100920.png)
 
 
-##### Classify the independent query data and visualize. The heatmap groups the cells according to the cell type with the maximum SCN classification score. Cells in the 'rand' SCN_class or category have a higher SCN score in the 'random' SCN_class than any cell type from the training data.
+##### Classify the independent query data and visualize the results. The heatmap groups the cells according to the cell type with the maximum SCN classification score. Cells in the 'rand' SCN_class or category have a higher SCN score in the 'random' SCN_class than any cell type from the training data.
 ```python
 adQlung = pySCN.scn_classify(adQuery, cgenesA, xpairs, tspRF, nrand = 0)
 
@@ -135,7 +135,7 @@ ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='SCN_class', cmap='v
 
 ![png](md_img/HM_Val_Other_softmax_100920.png)
 
-##### Visualize but group cells according to the annotation proivded with the associated study.
+##### Visualize again, but group cells according to the annotation proivded by the associated study.
 ```python
 ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='celltype', cmap='viridis', dendrogram=False, swap_axes=True)
 ```
@@ -147,7 +147,7 @@ ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='celltype', cmap='vi
 pySCN.add_classRes(adQuery, adQlung)
 ```
 
-##### Typical Scanpy pipeline: 
+##### Now, you can run your typical Scanpy pipeline to find cell clusters. 
 ###### Normalization and PCA
 ```python
 adM1Norm = adQuery.copy()
@@ -178,7 +178,7 @@ sc.pl.umap(adM1Norm, color=["leiden", "SCN_class"], alpha=.9, s=15, legend_loc='
 
 ![png](md_img/UMAP_Lung_Other_101120.png)
 
-##### To to plot a heatmap with the clustering information, you need to add this annotation to the annData object that is returned from scn_classify()
+##### To plot a heatmap with the clustering information, you need to add this annotation to the annData object that is returned from scn_classify()
 ```python
 adQlung.obs['leiden'] = adM1Norm.obs['leiden'].copy()
 adQlung.uns['leiden_colors'] = adM1Norm.uns['leiden_colors']
@@ -187,7 +187,7 @@ ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='leiden', cmap='viri
 
 ![png](md_img/HM_Lung_Leiden_101120.png)
 
-##### You can also overlap SCN score on UMAP embedding.
+##### You can also overlay SCN score on UMAP embedding.
 ```python
 sc.pl.umap(adM1Norm, color=["epithelial cell", "stromal cell", "B cell"], alpha=.9, s=15, legend_loc='on data', wspace=.3)
 ```
@@ -195,8 +195,19 @@ sc.pl.umap(adM1Norm, color=["epithelial cell", "stromal cell", "B cell"], alpha=
 ![png](md_img/UMAP_Lung_SCN_101120.png)
 
 
-Table of other training data goes here
+### Training data (currently only from Tabula senis)
 
-
+1. [Bladder](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adBladder_TabSen_101320.h5ad)
+2. [Fat](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adFat_TabSen_101320.h5ad)
+3. [Heart](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adHeart_TabSen_101320.h5ad)
+4. [Kidney](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adKidney_TabSen_101320.h5ad)
+5. [Large Intestine](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adL_Intestine_TabSen_101320.h5ad)
+6. [Lung](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adLung_TabSen_100920.h5ad)
+7. [Mammary Gland](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adMammary_Gland_TabSen_101320.h5ad)
+8. [Marrow](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adMarrow_TabSen_101320.h5ad)
+9. [Pancreas](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adPancreas_TabSen_101320.h5ad)
+10. [Skeletal Muscle](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adSkel_Muscle_TabSen_101320.h5ad)
+11. [Skin](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adSkin_TabSen_101320.h5ad)
+12. [Trachea](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adTrachea_TabSen_101320.h5ad)
 
 
