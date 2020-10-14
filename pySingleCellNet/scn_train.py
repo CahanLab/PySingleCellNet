@@ -86,8 +86,10 @@ def add_classRes(adata: AnnData, adClassRes, copy=False) -> AnnData:
     adata.obs['SCN_class'] = adClassRes.obs['SCN_class']
     return adata if copy else None
 
-
-
+def check_adX(adata: AnnData) -> AnnData:
+    from scipy import sparse
+    if( isinstance(adata.X, np.ndarray)):
+        adata.X = sparse.csr_matrix(adata.X)
 
 
 def scn_predict(cgenes, xpairs, rf_tsp, aDat, nrand = 2):
