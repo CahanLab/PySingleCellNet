@@ -10,11 +10,16 @@ from .tsp_rf import *
 def randomize(expDat, num=50):
 
     """Create random cell profiles from existing data
-    Args:
+    Parameteres
+    -----------
+    expDat:
         expDat (pandas dataframe): Gene Expression matrix
+    num: int
+        number of profiles randomly generated
 
     Returns:
-        gene expression matrix with added random cell profiles
+    --------
+        a randomized gene expression matrix (pandas dataframe) with added random cell profiles
 
     """
 
@@ -27,11 +32,15 @@ def randomize(expDat, num=50):
 def sc_trans_rnaseq(aDat,total = 10000 ):
 
     """Nomarlize and log-transform the raw expression count
-    Args:
+    Parameteres
+    -----------
+    aDat:
         expDat (pandas dataframe): Gene Expression matrix (raw counts)
-        total (int): total count
-        dThresh (int): threshold for detection
+    total: int    
+         total count after normalization
+    
     Returns:
+    --------
         normalized and log-transformed gene expression matrix
     """
 
@@ -44,14 +53,23 @@ def sc_trans_rnaseq(aDat,total = 10000 ):
 def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=False):
     
     """Build random forest classifier
-    Args:
+    Parameteres
+    -----------
+    expTrain:
         expTrain (pandas dataframe): Gene Expression matrix (raw counts)
-        genes (str): gene used for training
-        groups (str): annotation used for training
-        nRand (int): number of random cell profiles generated
-        ntrees (int): number of decision trees used in RandomForestClassifier
-        stratify (bool): whether to stratify samples for each class
-    Returns:
+    genes: str
+        gene used for training
+    groups: str
+        annotation used for training
+    nRand: int
+        number of random cell profiles generated
+    ntrees: int
+        number of decision trees used in RandomForestClassifier
+    stratify: bool
+        whether to stratify samples for each class
+    
+    Returns
+    -----------
         RandomForestClassifier
     """ 
 
@@ -69,6 +87,34 @@ def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=F
     return clf
 
 def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=False):
+
+    """Train for pySCN classifier
+    Parameteres
+    -----------
+    aTrain:
+        adata that contains training data for pySCN
+    dLevel: str
+        train labels
+    nTopGenes: int
+        numbers of top genes used to compute for topPairs
+    nTopGenePairs: int
+        number of topPairs used to construct pySCN classifier
+    ntrees: int
+        number of decision trees used in RandomForestClassifier
+    stratify: bool
+        whether to stratify samples for each class
+    counts_per_cell_after: int
+        total count after normalization
+    scaleMax: int
+        scaling factor 
+    limitToHVG: bool
+        whether to limit the gene selection to highly_variable_genes
+    
+    Returns
+    -----------
+        pySCN classifier
+    """ 
+
     warnings.filterwarnings('ignore')
     stTrain= aTrain.obs
     
@@ -104,6 +150,27 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
     return [cgenesA, xpairs, tspRF]
 
 def scn_classify(adata, cgenes, xpairs, rf_tsp, nrand = 0 ):
+
+    """Train for pySCN classifier
+    Parameteres
+    -----------
+    adata: AnnData
+        query dataset
+    cgenes: str
+        intersected genes between query dataset and training dataset
+    xpairs: str
+        topPairs
+    rf_tsp:
+        pySCN classifier
+    nrand: int
+        random number of profiles generated for query
+
+    Returns:
+    -------
+    aNew:AnnData
+        SCN classification matrix  
+
+    """
     classRes = scn_predict(cgenes, xpairs, rf_tsp, adata, nrand = nrand)
     categories = classRes.columns.values
     adNew = ad.AnnData(classRes, obs=adata.obs, var=pd.DataFrame(index=categories))
