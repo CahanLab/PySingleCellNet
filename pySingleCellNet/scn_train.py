@@ -151,7 +151,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
 
 def scn_classify(adata, cgenes, xpairs, rf_tsp, nrand = 0 ):
 
-    """Train for pySCN classifier
+    """Transform & predict labels with pySCN classifier and add the result to AnnData
     Parameteres
     -----------
     adata: AnnData
@@ -186,13 +186,32 @@ def add_classRes(adata: AnnData, adClassRes, copy=False) -> AnnData:
     adata.obs['SCN_class'] = adClassRes.obs['SCN_class']
     return adata if copy else None
 
-def check_adX(adata: AnnData) -> AnnData:
+def check_adX(adata: AnnData) -> AnnData:  
     from scipy import sparse
     if( isinstance(adata.X, np.ndarray)):
         adata.X = sparse.csr_matrix(adata.X)
 
 
 def scn_predict(cgenes, xpairs, rf_tsp, aDat, nrand = 2):
+    """Transform the query data and predict labels with pySCN classifier
+    Parameteres
+    -----------
+    adata: AnnData
+        query dataset
+    cgenes: str
+        intersected genes between query dataset and training dataset
+    xpairs: str
+        topPairs
+    rf_tsp:
+        pySCN classifier
+    nrand: int
+        random number of profiles generated for query
+
+    Returns:
+    -------
+    classRes_val:
+        SCN classification matrix  
+    """
 ###    expDat= pd.DataFrame(data=aDat.X, index= aDat.obs.index.values, columns= aDat.var.index.values)
     expDat= pd.DataFrame(data=aDat.X.toarray(), index= aDat.obs.index.values, columns= aDat.var.index.values)
     expValTrans=query_transform(expDat.reindex(labels=cgenes, axis='columns', fill_value=0), xpairs)
@@ -200,6 +219,22 @@ def scn_predict(cgenes, xpairs, rf_tsp, aDat, nrand = 2):
     return classRes_val
 
 def rf_classPredict(rfObj,expQuery,numRand=50):
+    """Predict labels with pySCN classifier
+    Parameteres
+    -----------
+    expQuery: 
+        transformed query dataset
+
+    rfObj:
+        pySCN classifier
+    numRand: int
+        random number of profiles generated for query
+
+    Returns:
+    -------
+    xpreds:pd DataFrame
+        SCN classification matrix  
+    """
     if numRand > 0 :
         randDat=randomize(expQuery, num=numRand)
         expQuery=pd.concat([expQuery, randDat])
