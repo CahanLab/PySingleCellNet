@@ -8,6 +8,30 @@ from .stats import *
 
 
 def csRenameOrth(expQuery,expTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
+
+    """Convert gene names betwen species
+    Parameteres
+    -----------
+    expQuery:
+        Query gene expression matrix
+    expTrain:
+        train gene expression matrix
+    orthTable:
+        species conversion orthTable
+    speciesQuery:
+        indicate species of query 'human' or 'mouse'
+    speciesTrain:
+        indicate species of query 'human' or 'mouse'
+
+    Returns:
+    --------
+    expQ:
+        a species compatible conversion gene expression table
+    expT:
+        a species compatible conversion gene expression table
+
+    """
+
     _,_,cgenes=np.intersect1d(expQuery.columns.values, orthTable[speciesQuery], return_indices=True)
     _,_,ccgenes=np.intersect1d(expTrain.columns.values, orthTable[speciesTrain], return_indices=True)
     temp1=np.zeros(len(orthTable.index.values), dtype=bool)

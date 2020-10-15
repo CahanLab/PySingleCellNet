@@ -224,7 +224,6 @@ def rf_classPredict(rfObj,expQuery,numRand=50):
     -----------
     expQuery: 
         transformed query dataset
-
     rfObj:
         pySCN classifier
     numRand: int
