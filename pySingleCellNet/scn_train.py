@@ -8,6 +8,16 @@ from .utils import *
 from .tsp_rf import *
 
 def randomize(expDat, num=50):
+
+    """Create random cell profiles from existing data
+    Args:
+        expDat (pandas dataframe): Gene Expression matrix
+
+    Returns:
+        gene expression matrix with added random cell profiles
+
+    """
+
     temp=expDat.to_numpy()
     temp=np.array([np.random.choice(x, len(x), replace=False) for x in temp])
     temp=temp.T
@@ -15,6 +25,16 @@ def randomize(expDat, num=50):
     return pd.DataFrame(data=temp, columns=expDat.columns).iloc[0:num,:]
 
 def sc_trans_rnaseq(aDat,total = 10000 ):
+
+    """Nomarlize and log-transform the raw expression count
+    Args:
+        expDat (pandas dataframe): Gene Expression matrix (raw counts)
+        total (int): total count
+        dThresh (int): threshold for detection
+    Returns:
+        normalized and log-transformed gene expression matrix
+    """
+
     sc.pp.normalize_per_cell(aDat, counts_per_cell_after=total)
     sc.pp.log1p(aDat)
     sc.pp.scale(aDat, max_value=10)
@@ -22,6 +42,19 @@ def sc_trans_rnaseq(aDat,total = 10000 ):
     return aDat
 
 def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=False):
+    
+    """Build random forest classifier
+    Args:
+        expTrain (pandas dataframe): Gene Expression matrix (raw counts)
+        genes (str): gene used for training
+        groups (str): annotation used for training
+        nRand (int): number of random cell profiles generated
+        ntrees (int): number of decision trees used in RandomForestClassifier
+        stratify (bool): whether to stratify samples for each class
+    Returns:
+        RandomForestClassifier
+    """ 
+
     randDat = randomize(expTrain, num=nRand)
     expT = pd.concat([expTrain, randDat])
     allgenes = expT.columns.values
