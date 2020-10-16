@@ -96,7 +96,7 @@ adQuery
 # AnnData object with n_obs × n_vars = 4240 × 16543
 ```
 
-##### Split the reference data into training data and data held out for later assessment. IDeally, we would assess performance on an indepdendent data.
+##### Split the reference data into training data and data held out for later assessment. IDeally, we would assess performance on an indepdendent data. The dLevel parameter indicates the label used to group cells into categories or classes.  
 ```python
 expTrain, expVal = pySCN.splitCommonAnnData(adTrain1, ncells=200,dLevel="cell_ontology_class")
 ```
@@ -193,6 +193,17 @@ sc.pl.umap(adM1Norm, color=["epithelial cell", "stromal cell", "B cell"], alpha=
 ```
 
 ![png](md_img/UMAP_Lung_SCN_101120.png)
+
+##### Cross-species classification
+Cross-species classification depends on on ortholog table. [Mouse-to-human ortholog table](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/oTab.csv)
+
+To use this, you need to convert query gene symbols to the ortholog names of the species of teh training data
+```python
+oTab = pd.read_csv("oTab.csv")
+[adQuery,adTrain] = pySCN.csRenameOrth(adQuery, adTrain, oTab)
+````
+
+Then you can proceed with the same training and analysis steps as above, starting with the call to splitCommonAnnData.
 
 
 ### Training data (currently only from Tabula senis)

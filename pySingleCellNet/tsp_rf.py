@@ -7,7 +7,22 @@ from .stats import *
 ### from stats import * 
 
 
-def csRenameOrth(expQuery,expTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
+def csRenameOrth(adQuery,adTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
+    _,_,cgenes=np.intersect1d(adQuery.var_names.values, orthTable[speciesQuery], return_indices=True)
+    _,_,ccgenes=np.intersect1d(adTrain.var_names.values, orthTable[speciesTrain], return_indices=True)
+    temp1=np.zeros(len(orthTable.index.values), dtype=bool)
+    temp2=np.zeros(len(orthTable.index.values), dtype=bool)
+    temp1[cgenes]=True
+    temp2[ccgenes]=True
+    common=np.logical_and(temp1, temp2)
+    oTab=orthTable.loc[common.T,:]
+    adT=adTrain[:, oTab[speciesTrain]]
+    adQ=adQuery[:, oTab[speciesQuery]]
+    adQ.var_names = adT.var_names
+    return [adQ, adT]
+
+
+def csRenameOrth2(expQuery,expTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
     _,_,cgenes=np.intersect1d(expQuery.columns.values, orthTable[speciesQuery], return_indices=True)
     _,_,ccgenes=np.intersect1d(expTrain.columns.values, orthTable[speciesTrain], return_indices=True)
     temp1=np.zeros(len(orthTable.index.values), dtype=bool)
