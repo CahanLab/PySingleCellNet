@@ -130,14 +130,14 @@ plt.show()
 ```python
 adQlung = pySCN.scn_classify(adQuery, cgenesA, xpairs, tspRF, nrand = 0)
 
-ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='SCN_class', cmap='viridis', dendrogram=False, swap_axes=True)
+ax = sc.pl.heatmap(adQlung, adQlung.var_names.values, groupby='SCN_class', cmap='viridis', dendrogram=False, swap_axes=True)
 ```
 
 ![png](md_img/HM_Val_Other_softmax_100920.png)
 
 ##### Visualize again, but group cells according to the annotation proivded by the associated study.
 ```python
-ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='celltype', cmap='viridis', dendrogram=False, swap_axes=True)
+ax = sc.pl.heatmap(adQlung, adQlung.var_names.values, groupby='celltype', cmap='viridis', dendrogram=False, swap_axes=True)
 ```
 
 ![png](md_img/HM_Val_Other_100920.png)
@@ -182,7 +182,7 @@ sc.pl.umap(adM1Norm, color=["leiden", "SCN_class"], alpha=.9, s=15, legend_loc='
 ```python
 adQlung.obs['leiden'] = adM1Norm.obs['leiden'].copy()
 adQlung.uns['leiden_colors'] = adM1Norm.uns['leiden_colors']
-ax = sc.pl.heatmap(adQlung, adVal.var_names.values, groupby='leiden', cmap='viridis', dendrogram=False, swap_axes=True)
+ax = sc.pl.heatmap(adQlung, adQlung.var_names.values, groupby='leiden', cmap='viridis', dendrogram=False, swap_axes=True)
 ```
 
 ![png](md_img/HM_Lung_Leiden_101120.png)
