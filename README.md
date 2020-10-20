@@ -2,7 +2,7 @@
 # pySingleCellNet
 
 ### Introduction 
-SingleCellNet (SCN) is a tool to perform 'cell typing', or classification of single cell RNA-Seq data. Two nice features of SCN are that it works (1) across species and (2) across platforms. See [the original paper](https://doi.org/10.1016/j.cels.2019.06.004) for more details. This repository contains the Python version of SCN. The original code was written in R [original Github Repository](https://github.com/pcahan1/SingleCellNet/). 
+SingleCellNet (SCN) is a tool to perform 'cell typing', or classification of single cell RNA-Seq data. Two nice features of SCN are that it works (1) across species and (2) across platforms. See [the original paper](https://doi.org/10.1016/j.cels.2019.06.004) for more details. This repository contains the Python version of SCN. The [original code](https://github.com/pcahan1/SingleCellNet/) was written in R. 
 
 ### Prerequisites
 
@@ -21,7 +21,7 @@ pip install pandas numpy sklearn scanpy sklearn statsmodels scipy matplotlib sea
 Below is a brief tutorial that shows you how to use SCN. In this example, we train a classifier based on mouse lung cells, we assess the performance of the classifier on held out data, then we apply the classifier to analyze indepdendent mouse lung data. 
 
 #### Training data
-SCN has to be trainined on well-annotated reference data. In this example, we use data geernated as part of the Tabula Muris (Senis) project. Specifically, we use the droplet lung data. We have compiled several other training data sets as listed below. 
+SCN has to be trainined on well-annotated reference data. In this example, we use data generated as part of the Tabula Muris (Senis) project. Specifically, we use the droplet lung data. We have compiled several other training data sets as listed below. 
 
 [Lung training data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adLung_TabSen_100920.h5ad)
 
@@ -30,8 +30,8 @@ To illustrate how you might use SCN to perform cell tying, we apply it to anothe
 
 >Angelidis I, Simon LM, Fernandez IE, Strunz M et al. An atlas of the aging lung mapped by single cell transcriptomics and deep tissue proteomics. Nat Commun 2019 Feb 27;10(1):963. PMID: 30814501
 
-You will need to decompress this file prior to loading it:
-[Query expression data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx.gz)
+
+[Query expression data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/query/GSE124872_raw_counts_single_cell.mtx.gz) <- You will need to decompress this file prior to loading it.
 
 [Query meta-data](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/query/GSE124872_Angelidis_2018_metadata.csv)
 
@@ -47,7 +47,8 @@ import seaborn as sns
 import scanpy as sc
 import scipy as sp
 import numpy as np
-import loompy # only needed if using loom files
+# Loompy is only needed if using loom files
+# import loompy 
 import anndata
 
 sc.settings.verbosity = 3 
@@ -56,7 +57,8 @@ sc.logging.print_header()
 import pySingleCellNet as pySCN
 ```
 
-##### Load the training data. You should always start with the raw counts. 
+##### Load the training data.
+You should always start with the raw counts. 
 ```python
 adTrain = sc.read("adLung_TabSen_100920.h5ad")
 adTrain
@@ -64,7 +66,8 @@ adTrain
 
 ```
 
-##### Load the query data. You should always start with the raw counts. If your expression is stored as a numpyt array, you can convert it with the check_adX(adata) function.
+##### Load the query data.
+You should always start with the raw counts. If your expression is stored as a numpy array, you can convert it with the check_adX(adata) function.
 ```python
 qDatT = sc.read_mtx("GSE124872_raw_counts_single_cell.mtx")
 qDat = qDatT.T
@@ -77,6 +80,11 @@ qMeta.columns.values[0] = "cellid"
 
 qMeta.index = qMeta["cellid"]
 qDat.obs = qMeta.copy()
+
+# If your expression data is stored as a numpy array, convert it 
+# type(qDat.X)
+# <class 'numpy.ndarray'>
+# pySCN.check_adX(qDat)
 ```
 
 ##### Find common genes
@@ -96,17 +104,20 @@ adQuery
 # AnnData object with n_obs × n_vars = 4240 × 16543
 ```
 
-##### Split the reference data into training data and data held out for later assessment. IDeally, we would assess performance on an indepdendent data. The dLevel parameter indicates the label used to group cells into categories or classes.  
+##### Split the reference data into training data and data held out for later assessment.
+Ideally, we would assess performance on an indepdendent data. The dLevel parameter indicates the label used to group cells into categories or classes. Set this argument as appropriate for your training data.  
 ```python
 expTrain, expVal = pySCN.splitCommonAnnData(adTrain1, ncells=200,dLevel="cell_ontology_class")
 ```
 
-##### Train the classifier. This can take several minutes.
+##### Train the classifier.
+This can take several minutes.
 ```python
 [cgenesA, xpairs, tspRF] = pySCN.scn_train(expTrain, nTopGenes = 100, nRand = 100, nTrees = 1000 ,nTopGenePairs = 100, dLevel = "cell_ontology_class", stratify=True, limitToHVG=True)
 ```
 
 ##### Classify the held-out data and visualize.
+Rows indicate class labels as defined in the dLevel argument. Columns represent cells, which are grouped by the class with the maximum score.
 ``` python
 adVal = pySCN.scn_classify(expVal, cgenesA, xpairs, tspRF, nrand = 0)
 
@@ -116,6 +127,7 @@ ax = sc.pl.heatmap(adVal, adVal.var_names.values, groupby='SCN_class', cmap='vir
 
 
 ##### Determine how well the classifier predicts cell type of held out data and plot
+The assessment object holds other evaluation metrics including multiLogLoss, Kappa, and accuracy.
 ```python
 assessment =  pySCN.assess_comm(expTrain, adVal, resolution = 0.005, nRand = 0, dLevelSID = "cell", classTrain = "cell_ontology_class", classQuery = "cell_ontology_class")
 
@@ -126,7 +138,8 @@ plt.show()
 ![png](md_img/PR_curves_Lung_100920.png)
 
 
-##### Classify the independent query data and visualize the results. The heatmap groups the cells according to the cell type with the maximum SCN classification score. Cells in the 'rand' SCN_class or category have a higher SCN score in the 'random' SCN_class than any cell type from the training data.
+##### Classify the independent query data and visualize the results.
+The heatmap groups the cells according to the cell type with the maximum SCN classification score. Cells in the 'rand' SCN_class or category have a higher SCN score in the 'random' SCN_class than any cell type from the training data.
 ```python
 adQlung = pySCN.scn_classify(adQuery, cgenesA, xpairs, tspRF, nrand = 0)
 
@@ -135,14 +148,16 @@ ax = sc.pl.heatmap(adQlung, adQlung.var_names.values, groupby='SCN_class', cmap=
 
 ![png](md_img/HM_Val_Other_softmax_100920.png)
 
-##### Visualize again, but group cells according to the annotation proivded by the associated study.
+##### Visualize again.
+Now group cells according to the annotation provided by the associated study.
 ```python
 ax = sc.pl.heatmap(adQlung, adQlung.var_names.values, groupby='celltype', cmap='viridis', dendrogram=False, swap_axes=True)
 ```
 
 ![png](md_img/HM_Val_Other_100920.png)
 
-##### Add the classification result to the query annData object. We add the SCN scores as well as the softmax classification (i.e. a label corresponding to the cell type with the maximum SCN score -- this goes in adata.obs["SCN_class"]). 
+##### Add the classification result to the query annData object
+We add the SCN scores as well as the softmax classification (i.e. a label corresponding to the cell type with the maximum SCN score -- this goes in adata.obs["SCN_class"]). 
 ```python
 pySCN.add_classRes(adQuery, adQlung)
 ```
@@ -195,9 +210,9 @@ sc.pl.umap(adM1Norm, color=["epithelial cell", "stromal cell", "B cell"], alpha=
 ![png](md_img/UMAP_Lung_SCN_101120.png)
 
 ##### Cross-species classification
-Cross-species classification depends on on ortholog table. [Mouse-to-human ortholog table](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/oTab.csv)
+Cross-species classification depends on an ortholog table. [Mouse-to-human ortholog table](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/oTab.csv)
 
-To use this, you need to convert query gene symbols to the ortholog names of the species of teh training data
+To use this, you need to convert query gene symbols to the ortholog names of the species of the training data
 ```python
 oTab = pd.read_csv("oTab.csv")
 [adQuery,adTrain] = pySCN.csRenameOrth(adQuery, adTrain, oTab)
