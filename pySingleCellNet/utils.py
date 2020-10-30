@@ -18,7 +18,6 @@ def ctRename(sampTab, annCol, oldName, newName):
 
 #adapted from Sam's code
 def splitCommonAnnData(adata, ncells, dLevel="cell_ontology_class", cellid = None, cells_reserved = 3):
-
     if cellid == None: 
         adata.obs[cellid] = adata.obs.index
     cts = set(adata.obs[dLevel])

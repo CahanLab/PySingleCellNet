@@ -4,6 +4,7 @@ DESCRIPTION
 LICENSE
 README.md
 setup.py
+dist/pySingleCellNet-0.1-py3.7.egg
 inProgressFunctions/conversionToAdata.py
 md_img/HM_Lung_Leiden_101120.png
 md_img/HM_Val_Lung_100920.png
