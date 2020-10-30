@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: pySingleCellNet
+Version: 0.1
+Summary: Determining cell identity from single cell RNA-Seq data
+Home-page: http://github.com/pcahan1/PySingleCellNet/
+Author: Patrick Cahan
+Author-email: patrick.cahan@gmail.com
+License: MIT
+Description: UNKNOWN
+Platform: UNKNOWN
