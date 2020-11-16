@@ -93,6 +93,8 @@ def check_adX(adata: AnnData) -> AnnData:
 
 
 def scn_predict(cgenes, xpairs, rf_tsp, aDat, nrand = 2):
+    # in the case of aDat.X is a numpy array 
+    aDat.X = ad._core.views.ArrayView(aDat.X)
 ###    expDat= pd.DataFrame(data=aDat.X, index= aDat.obs.index.values, columns= aDat.var.index.values)
     expDat= pd.DataFrame(data=aDat.X.toarray(), index= aDat.obs.index.values, columns= aDat.var.index.values)
     expValTrans=query_transform(expDat.reindex(labels=cgenes, axis='columns', fill_value=0), xpairs)
