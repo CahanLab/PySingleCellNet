@@ -142,7 +142,7 @@ def plot_attr2(adata, dLevel):
     plt.tight_layout()
 
 
-def get_cate(classRes, aData, cThresh = 0):
+def get_cate(classRes, adata, cThresh = 0):
     res=classRes.idxmax(axis=1)
     if cThresh>0:
         for i in range(0, len(res)):
