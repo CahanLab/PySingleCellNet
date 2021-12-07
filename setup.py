@@ -1,6 +1,6 @@
 from setuptools import setup
 
-setup(name='pySingleCellNet',
+setup(name='pyscn_gavehan',
       version='0.1',
       description='Determining cell identity from single cell RNA-Seq data',
       url='http://github.com/pcahan1/PySingleCellNet/',
