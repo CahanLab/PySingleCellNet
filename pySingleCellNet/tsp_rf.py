@@ -3,8 +3,8 @@ import numpy as np
 from sklearn import linear_model
 from itertools import combinations
 from .stats import * 
-
-### from stats import * 
+import multiprocessing as mp
+from tqdm import tqdm
 
 
 def csRenameOrth(adQuery,adTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
@@ -162,51 +162,55 @@ def gnrBP(expDat,cellLabels,topX=50):
         ans[levels[i]]=tmpAns
     return ans
 
-def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, quickPairs = True):
+def __ptGetTopHelper(start, stp, statList=None):
+    stp = np.min([stp, nPairs])
+    tmpTab = pairTab.iloc[start:stp, :]
+    tmpPdat = ptSmall(expDat, tmpTab)
+    tmpRes = dict((k, sc_testPattern(v, tmpPdat)) for k, v in myPatternG.items())
+    if statList:
+        for g in grps:
+            statList[g] = pd.concat([statList[g], tmpRes[g]])
+    else:
+        statList = tmpRes
+    return (stp, stp+sliceSize, statList)
+
+def __ptGetTopMpHelper(g):
+    return findBestPairs(statList[g], topX)
+
+def __ptGetTopQuickMpHelper(g):
+    cur_genes = cgenes_list[g]
+    pairTab = makePairTab(cur_genes)
+    tmpPdat = ptSmall(expDat, pairTab)
+    tmpAns = findBestPairs(sc_testPattern(myPatternG[g], tmpPdat), topX)
+    return tmpAns
+
+def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize=5000, quickPairs=True, n_procs=1):
+    myPatternG = sc_sampR_to_pattern(cell_labels)
+    grps = np.unique(cell_labels)
     if not quickPairs:
-        genes=expDat.columns.values
-        grps=np.unique(cell_labels)
-        myPatternG=sc_sampR_to_pattern(cell_labels)
-        pairTab=makePairTab(genes)
+        genes = expDat.columns.values
+        pairTab = makePairTab(genes)
         nPairs = len(pairTab)
         start = 0
-        stp = np.min([sliceSize, nPairs])
-        tmpTab = pairTab.iloc[start:stp,:]
-        tmpPdat = ptSmall(expDat, tmpTab)
-        statList= dict((k, sc_testPattern(v, tmpPdat)) for k, v in myPatternG.items())
-        start= stp
-        stp= start + sliceSize
+        stp = sliceSize
+        start, stp, statList = __ptGetTopHelper(start, stp)
         while start < nPairs:
             print(start)
-            if stp > nPairs:
-                stp =  nPairs
-            tmpTab = pairTab.iloc[start:stp,:]
-            tmpPdat = ptSmall(expDat, tmpTab)
-            tmpAns=dict((k, sc_testPattern(v, tmpPdat)) for k, v in myPatternG.items())
-            for g in grps:
-                statList[g]=pd.concat([statList[g], tmpAns[g]])
-            start= stp
-            stp= start + sliceSize
-        res=[]
-        for g in grps:
-            tmpAns=findBestPairs(statList[g], topX)
-            res.append(tmpAns)
-        return np.unique(np.array(res).flatten())
-
-
+            start, stp, statList = __ptGetTopHelper(start, stp)
+        with mp.Pool(processes=n_procs) as pool:
+            res = list(tqdm(
+                pool.imap_unordered(__ptGetTopMpHelper, grps)),
+                total=len(grps),
+                ascii=True
+                )
     else:
-        myPatternG= sc_sampR_to_pattern(cell_labels)
-        res=[]
-        grps=np.unique(cell_labels)
-        for g in grps:
-            print(g)
-            genes=cgenes_list[g]
-            pairTab=makePairTab(genes)
-            nPairs=len(pairTab)
-            tmpPdat=ptSmall(expDat, pairTab)
-            tmpAns=findBestPairs(sc_testPattern(myPatternG[g],tmpPdat), topX)
-            res.append(tmpAns)
-        return np.unique(np.array(res).flatten())
+        with mp.Pool(processes=n_procs) as pool:
+            res = list(tqdm(
+                pool.imap_unordered(__ptGetTopQuickMpHelper, grps)),
+                total=len(grps),
+                ascii=True
+                )
+    return np.unique(np.array(res).flatten())
 
 def findClassyGenes(expDat, sampTab,dLevel, topX=25, dThresh=0, alpha1=0.05,alpha2=.001, mu=2):
     gsTrain=sc_statTab(expDat, dThresh=dThresh)
