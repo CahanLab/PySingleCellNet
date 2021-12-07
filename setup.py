@@ -18,6 +18,7 @@ setup(name='pySingleCellNet',
           'scipy',
           'matplotlib',
           'seaborn',
-          'umap-learn'
+          'umap-learn',
+          'tqdm'
       ],
       zip_safe=False)
