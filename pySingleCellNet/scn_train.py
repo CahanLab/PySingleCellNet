@@ -35,11 +35,23 @@ def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=F
     clf.fit(expT.loc[:,ggenes].to_numpy(), ggroups)
     return clf
 
-def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=False):
+def scn_train(
+    aTrain,
+    dLevel,
+    nTopGenes=100,
+    nTopGenePairs=100,
+    nRand=100,
+    nTrees=1000,
+    stratify=False,
+    counts_per_cell_after=1e4,
+    scaleMax=10,
+    limitToHVG=False,
+    n_procs=1
+    ):
     warnings.filterwarnings('ignore')
-    stTrain= aTrain.obs
+    stTrain = aTrain.obs
     
-    expRaw = pd.DataFrame(data=aTrain.X.toarray(),  index= aTrain.obs.index.values, columns= aTrain.var.index.values)
+    expRaw = pd.DataFrame(data=aTrain.X.toarray(), index=aTrain.obs.index.values, columns=aTrain.var.index.values)
     expRaw = expRaw.loc[stTrain.index.values]
 
     adNorm = aTrain.copy()
@@ -52,22 +64,18 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
         adNorm = adNorm[:, adNorm.var.highly_variable]
 
     sc.pp.scale(adNorm, max_value=scaleMax)
-    expTnorm= pd.DataFrame(data=adNorm.X,  index= adNorm.obs.index.values, columns= adNorm.var.index.values)
-    expTnorm=expTnorm.loc[stTrain.index.values]
+    expTnorm = pd.DataFrame(data=adNorm.X,  index=adNorm.obs.index.values, columns=adNorm.var.index.values)
+    expTnorm = expTnorm.loc[stTrain.index.values]
 
-    ### expTnorm= pd.DataFrame(data=aTrain.X,  index= aTrain.obs.index.values, columns= aTrain.var.index.values)
-    ### expTnorm=expTnorm.loc[stTrain.index.values]
     print("Matrix normalized")
-    ### cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
-    cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
+    cgenesA, grps, cgenes_list = findClassyGenes(expTnorm, stTrain, dLevel=dLevel, topX=nTopGenes)
     print("There are ", len(cgenesA), " classification genes\n")
-    ### xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
-    xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
+    xpairs = ptGetTop(expTnorm.loc[:, cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000, n_procs=n_procs)
 
     print("There are", len(xpairs), "top gene pairs\n")
-    pdTrain= query_transform(expRaw.loc[:,cgenesA], xpairs)
+    pdTrain = query_transform(expRaw.loc[:, cgenesA], xpairs)
     print("Finished pair transforming the data\n")
-    tspRF=sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees, stratify=stratify)
+    tspRF = sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand=nRand, ntrees=nTrees, stratify=stratify)
     return [cgenesA, xpairs, tspRF]
 
 def scn_classify(adata, cgenes, xpairs, rf_tsp, nrand = 0 ):
