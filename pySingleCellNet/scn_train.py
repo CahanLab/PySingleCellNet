@@ -35,7 +35,7 @@ def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=F
     clf.fit(expT.loc[:,ggenes].to_numpy(), ggroups)
     return clf
 
-def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=False):
+def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=False, normalization = False, include_all_genes = False):
     warnings.filterwarnings('ignore')
     stTrain= aTrain.obs
     
@@ -43,23 +43,33 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
     expRaw = expRaw.loc[stTrain.index.values]
 
     adNorm = aTrain.copy()
-    sc.pp.normalize_per_cell(adNorm, counts_per_cell_after=counts_per_cell_after)
-    sc.pp.log1p(adNorm)
+    if normalization == True:
+        sc.pp.normalize_per_cell(adNorm, counts_per_cell_after=counts_per_cell_after)
+        sc.pp.log1p(adNorm)
 
-    print("HVG")
-    if limitToHVG:
-        sc.pp.highly_variable_genes(adNorm, min_mean=0.0125, max_mean=4, min_disp=0.5)
-        adNorm = adNorm[:, adNorm.var.highly_variable]
+        print("HVG")
+        if limitToHVG:
+            sc.pp.highly_variable_genes(adNorm, min_mean=0.0125, max_mean=4, min_disp=0.5)
+            adNorm = adNorm[:, adNorm.var.highly_variable]
 
-    sc.pp.scale(adNorm, max_value=scaleMax)
-    expTnorm= pd.DataFrame(data=adNorm.X,  index= adNorm.obs.index.values, columns= adNorm.var.index.values)
+        sc.pp.scale(adNorm, max_value=scaleMax)
+
+    expTnorm= pd.DataFrame(data=adNorm.X.toarray(),  index= adNorm.obs.index.values, columns= adNorm.var.index.values)
     expTnorm=expTnorm.loc[stTrain.index.values]
 
     ### expTnorm= pd.DataFrame(data=aTrain.X,  index= aTrain.obs.index.values, columns= aTrain.var.index.values)
     ### expTnorm=expTnorm.loc[stTrain.index.values]
     print("Matrix normalized")
     ### cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
-    cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
+    if include_all_genes == True:
+        cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
+    else: 
+        cgenesA = np.array(aTrain.var.index)
+        grps = aTrain.obs[dLevel]
+        cgenes_list = dict()
+        for g in np.unique(grps):
+            cgenes_list[g] = cgenesA
+
     print("There are ", len(cgenesA), " classification genes\n")
     ### xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
     xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
