@@ -39,7 +39,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
     warnings.filterwarnings('ignore')
     stTrain= aTrain.obs
     
-    expRaw = pd.DataFrame(data=aTrain.X.toarray(),  index= aTrain.obs.index.values, columns= aTrain.var.index.values)
+    expRaw = aTrain.to_df()
     expRaw = expRaw.loc[stTrain.index.values]
 
     adNorm = aTrain.copy()
@@ -54,7 +54,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
 
         sc.pp.scale(adNorm, max_value=scaleMax)
 
-    expTnorm= pd.DataFrame(data=adNorm.X.toarray(),  index= adNorm.obs.index.values, columns= adNorm.var.index.values)
+    expTnorm = adNorm.to_df()
     expTnorm=expTnorm.loc[stTrain.index.values]
 
     ### expTnorm= pd.DataFrame(data=aTrain.X,  index= aTrain.obs.index.values, columns= aTrain.var.index.values)
