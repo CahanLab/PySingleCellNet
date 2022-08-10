@@ -61,7 +61,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
     ### expTnorm=expTnorm.loc[stTrain.index.values]
     print("Matrix normalized")
     ### cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
-    if include_all_genes == True:
+    if include_all_genes == False:
         cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
     else: 
         cgenesA = np.array(aTrain.var.index)
