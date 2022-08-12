@@ -78,7 +78,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
     pdTrain= query_transform(expRaw.loc[:,cgenesA], xpairs)
     print("Finished pair transforming the data\n")
     tspRF=sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees, stratify=stratify)
-    return [cgenesA, xpairs, tspRF]
+    return [cgenesA, xpairs, tspRF, cgenes_list]
 
 def scn_classify(adata, cgenes, xpairs, rf_tsp, nrand = 0 ):
     classRes = scn_predict(cgenes, xpairs, rf_tsp, adata, nrand = nrand)
