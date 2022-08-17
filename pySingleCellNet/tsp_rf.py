@@ -222,5 +222,3 @@ def findClassyGenes(expDat, sampTab,dLevel, topX=25, dThresh=0, alpha1=0.05,alph
         res.append(temp)
     cgenes2=np.unique(np.array(res).flatten())
     return [cgenes2, grps, cgenes]
-
-    
