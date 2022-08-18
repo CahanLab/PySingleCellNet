@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import scanpy as sc
 from sklearn import linear_model
 from itertools import combinations
 from .stats import * 
@@ -221,4 +222,23 @@ def findClassyGenes(expDat, sampTab,dLevel, topX=25, dThresh=0, alpha1=0.05,alph
         cgenes[g]=temp
         res.append(temp)
     cgenes2=np.unique(np.array(res).flatten())
+    return [cgenes2, grps, cgenes]
+
+def findClassyGenes_edit(adDat, dLevel, topX=25):
+    adTemp = adDat.copy()
+    grps = adDat.obs[dLevel]
+    groups = np.unique(grps)
+
+    sc.tl.rank_genes_groups(adTemp, dLevel, method='wilcoxon')
+    tempTab = pd.DataFrame(adTemp.uns['rank_genes_groups']['names']).head(topX)
+
+    res = []
+    cgenes = {}
+
+    for g in groups:
+        temp = tempTab[g]
+        res.append(temp)
+        cgenes[g] = temp.to_numpy()
+    cgenes2 = np.unique(np.array(res).flatten())
+
     return [cgenes2, grps, cgenes]
