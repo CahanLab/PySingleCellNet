@@ -241,6 +241,4 @@ def findClassyGenes_edit(adDat, dLevel, topX=25):
         cgenes[g] = temp.to_numpy()
     cgenes2 = np.unique(np.array(res).flatten())
 
-    print('new functionality run')
-
     return [cgenes2, grps, cgenes]
