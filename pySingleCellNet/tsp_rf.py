@@ -236,7 +236,7 @@ def findClassyGenes_edit(adDat, dLevel, topX=25):
     cgenes = {}
 
     for g in groups:
-        temp = tempTab[g]
+        temp = tempTab[g] 
         res.append(temp)
         cgenes[g] = temp.to_numpy()
     cgenes2 = np.unique(np.array(res).flatten())
