@@ -229,7 +229,7 @@ def findClassyGenes_edit(adDat, dLevel, topX=25):
     grps = adDat.obs[dLevel]
     groups = np.unique(grps)
 
-    sc.tl.rank_genes_groups(adTemp, dLevel, method='wilcoxon')
+    sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method='wilcoxon')
     tempTab = pd.DataFrame(adTemp.uns['rank_genes_groups']['names']).head(topX)
 
     res = []
