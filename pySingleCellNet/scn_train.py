@@ -35,7 +35,7 @@ def sc_makeClassifier(expTrain, genes, groups, nRand=70, ntrees=2000, stratify=F
     clf.fit(expT.loc[:,ggenes].to_numpy(), ggroups)
     return clf
 
-def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=True, normalization = True, include_all_genes = False):
+def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=False, normalization = True, include_all_genes = False):
     warnings.filterwarnings('ignore')
     stTrain= aTrain.obs
     
