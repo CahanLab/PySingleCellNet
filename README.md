@@ -220,6 +220,49 @@ oTab = pd.read_csv("oTab.csv")
 
 Then you can proceed with the same training and analysis steps as above, starting with the call to splitCommonAnnData.
 
+### Use hm_mgenes to visualize different expressed genes between different classified cell types
+
+Different pySCN classified cells have respectively high express genes. To visualize their expression between specific cell types, we could use hm_mgenes as a tool.
+
+To work through hm_mgenes, using scn_train_edit as a training functionality would be a better choice because it returns an important dict with cell types and highly expressed genes.
+
+```python
+[cgenesA, xpairs, tspRF, cgenes_list] = pySCN.scn_train_edit(expTrain, dLevel = 'cell_ontology_class', nTopGenes = 100, nTopGenePairs = 100, nRand = 100, nTrees = 1000, stratify=True)
+```
+
+Classify the query data with a same procedure as above:
+
+```python
+adQlung = pySCN.scn_classify(adQuery, cgenesA, xpairs, tspRF, nrand = 0)
+ax = sc.pl.heatmap(adQlung, adQlung.var_names.values, groupby='SCN_class', cmap='viridis', dendrogram=False, swap_axes=True, save=True)
+```
+
+##### Add classification result and dlevel to original data
+
+Then, you should add SCN classification result into query data and add orignal dlevel data into train dataset.
+
+```python
+adQuery = pySCN.add_classRes_result(adQuery, adQlung, copy=True)
+expTrain = pySCN.add_training_dlevel(expTrain, 'cell_ontology_class')
+```
+
+Keep in mind that the dlevel parameter used here should be the same one as the one you used when training.
+
+##### Choose cell types to visualize and determine whether to add training data for each type
+
+```python
+L_type = ['B cell', 'endothelial cell', 'stromal cell']
+L_train = [True, True, True]
+```
+
+Visulize them
+
+```python
+ax = hm_mgenes(adQuery, expTrain, cgenes_list, L_type, L_train, 5, query_annotation_togroup='SCN_result', training_annotation_togroup='SCN_result', save=True)
+```
+![png](md_img/hm_mgenes_result.png)
+
+The list_of_types_to_show and list_of_training_toshow parameters spares datasets based on SCN classification result (so the former parameter should be a list like data with SCN types), while query and training annotation to group could be other annotation among .obs columns within the two datasets.
 
 ### Training data (currently only from Tabula senis)
 

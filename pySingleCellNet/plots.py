@@ -1,11 +1,13 @@
 import numpy as np
 import pandas as pd
+import scanpy as sc
 import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 import umap
 import anndata as ad
+from scipy.sparse import csr_matrix
 
 
 
@@ -164,3 +166,88 @@ def plot_umap(aData, dLevel="category"):
     plt.xlabel("Component 1")
     plt.ylabel("Component 2")
     plt.legend(loc="center left", ncol=2, bbox_to_anchor=(1, 0.5))
+
+def hm_mgenes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], list_of_training_to_show=[], number_of_genes_toshow=3, query_annotation_togroup='SCN_result', training_annotation_togroup='SCN_result', save = False):
+    if list_of_types_toshow.__len__() == list_of_training_to_show.__len__():
+        if list_of_types_toshow.__len__() == 0:
+            list_of_types_toshow = np.unique(adQuery.obs['SCN_result'])
+            num = list_of_types_toshow.__len__()
+            list_of_training_to_show = [False for _ in range(num)]
+            # Default: all shown and False
+        else:
+            if adTrain is None:
+                print("No adTrain given")
+                return
+            else:
+                pass
+    elif list_of_training_to_show.__len__() == 0:
+        num = list_of_types_toshow.__len__()
+        list_of_training_to_show = [False for _ in range(num)]
+        # Default: all False
+    else:
+        print("Boolean list not correspondent to list of types")
+        return
+
+
+    list_1 = []
+    list_2 = []
+    SCN_annot = []
+    annot = []
+
+    MQ = adQuery.X.todense()
+    if adTrain is not None:
+        MT = adTrain.X.todense()
+    else:
+        pass
+    
+
+    for i in range(list_of_types_toshow.__len__()):
+        type = list_of_types_toshow[i]
+        for j in range(np.size(MQ, 0)):
+            if adQuery.obs['SCN_result'][j] == type:
+                list_1.append(j)
+                SCN_annot.append(type)
+                annot.append(adQuery.obs[query_annotation_togroup][j])
+
+    for i in range(list_of_training_to_show.__len__()):
+        type = list_of_types_toshow[i]            
+        if list_of_training_to_show[i]:
+            for j in range(np.size(MT, 0)):
+                if adTrain.obs['SCN_result'][j] == type:
+                    list_2.append(j)
+                    SCN_annot.append(type)
+                    annot.append(adTrain.obs[training_annotation_togroup][j])
+        else:
+            pass
+    
+    SCN_annot = pd.DataFrame(SCN_annot)
+    annot = pd.DataFrame(annot)
+
+    M_1 = MQ[list_1,:]
+    if adTrain is not None:
+        M_2 = MT[list_2,:]
+    else:
+        pass
+
+    if adTrain is None:
+        Mdense = M_1
+    else:
+        Mdense = np.concatenate((M_1,M_2))
+    New_Mat = csr_matrix(Mdense)
+    adTrans = sc.AnnData(New_Mat)
+
+    adTrans.obs['SCN_result'] = SCN_annot.values
+    adTrans.obs['Cell_Type'] = annot.values
+    adTrans.var_names = adQuery.var_names
+
+    sc.pp.normalize_per_cell(adTrans, counts_per_cell_after=1e4)
+    sc.pp.log1p(adTrans)
+
+    RankList = []
+
+    for type in list_of_types_toshow:
+        for i in range(number_of_genes_toshow):
+            RankList.append(cgenes_list[type][i])
+
+    fig = sc.pl.heatmap(adTrans, RankList, groupby='Cell_Type', cmap='viridis', dendrogram=False, swap_axes=True, save=save)
+    return fig
