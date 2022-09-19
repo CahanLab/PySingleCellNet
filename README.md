@@ -264,6 +264,48 @@ ax = hm_mgenes(adQuery, expTrain, cgenes_list, L_type, L_train, 5, query_annotat
 
 The list_of_types_to_show and list_of_training_toshow parameters spares datasets based on SCN classification result (so the former parameter should be a list like data with SCN types), while query and training annotation to group could be other annotation among .obs columns within the two datasets.
 
+
+### Use select_type_pairs to visulize similar cells with vocano plot for more information ###
+
+Sometimes we want to figure out deeper difference between similar cells, or to find master regulators that could effect high/low recognized cells. 
+
+First, add SCN result to query datasets and scale both train and query data (remember not to do the scaling before traning).
+
+```python
+adQuery = pySCN.add_classRes(adQuery, adQlung, copy=True)
+
+sc.pp.scale(expTrain, max_value=10)
+sc.pp.scale(adQuery, max_value=10)
+```
+
+Then use this function to distinguish cells that have different classify scores (or between train and query cells). You could choose a specific cell type and choose a threshold to apply it.
+
+```python
+adRanking = select_type_pairs(expTrain, adQuery, 'endothelial cell', 0.4, 'cell_ontology_class')
+```
+
+After this function, you'll get a anndata object with varm showing log2foldchanges and pvalues of differential genes.
+
+```python
+data = adRanking.varm['voc_tab'].copy()
+
+genes = np.array(data.index)
+
+for gene in genes:
+    if np.isnan(data['logFC'][gene]):
+        data = data.drop(index=[gene])
+
+data['geneid'] = data.index
+```
+
+After which, the ```data``` could be performed with vocano plot.
+
+To use visuz, you should do ```from bioinfokit import visuz```
+
+```python
+visuz.GeneExpression.volcano(data, 'logFC', 'Pvalue', lfc_thr=[1, 1], color=('red', 'grey', 'blue'), valpha=0.6, geneid='geneid', genenames='deg', gfont=1.0, dotsize=2, figtype='pdf', figname='vocano_lung')
+```
+
 ### Training data (currently only from Tabula senis)
 
 1. [Bladder](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adBladder_TabSen_101320.h5ad)
