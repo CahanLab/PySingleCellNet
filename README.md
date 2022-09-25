@@ -242,7 +242,7 @@ ax = sc.pl.heatmap(adQlung, adQlung.var_names.values, groupby='SCN_class', cmap=
 Then, you should add SCN classification result into query data and add orignal dlevel data into train dataset.
 
 ```python
-adQuery = pySCN.add_classRes_result(adQuery, adQlung, copy=True)
+adQuery = pySCN.add_classRes(adQuery, adQlung, copy=True)
 expTrain = pySCN.add_training_dlevel(expTrain, 'cell_ontology_class')
 ```
 
@@ -258,11 +258,11 @@ L_train = [True, True, True]
 Visulize them
 
 ```python
-ax = hm_mgenes(adQuery, expTrain, cgenes_list, L_type, L_train, 5, query_annotation_togroup='SCN_result', training_annotation_togroup='SCN_result', save=True)
+ax = pySCN.hm_genes(adQuery, expTrain, cgenes_list, L_type, L_train, 5, query_annotation_togroup='SCN_class', training_annotation_togroup='SCN_class',split_show=False, save=True)
 ```
 ![png](md_img/hm_mgenes_result.png)
 
-The list_of_types_to_show and list_of_training_toshow parameters spares datasets based on SCN classification result (so the former parameter should be a list like data with SCN types), while query and training annotation to group could be other annotation among .obs columns within the two datasets.
+The list_of_types_to_show and list_of_training_toshow parameters spares datasets based on SCN classification result (so the former parameter should be a list like data with SCN types), while query and training annotation to group could be other annotation among .obs columns within the two datasets. If you want the annotation shown in figure more clear about its source, please set ```split_show=True```and their would be seperate name bar beloe the picture. Go ahead and try that!
 
 
 ### Use select_type_pairs to visulize similar cells with vocano plot for more information ###
@@ -273,15 +273,16 @@ First, add SCN result to query datasets and scale both train and query data (rem
 
 ```python
 adQuery = pySCN.add_classRes(adQuery, adQlung, copy=True)
+# Do not have to do that again if done before
 
 sc.pp.scale(expTrain, max_value=10)
 sc.pp.scale(adQuery, max_value=10)
 ```
 
-Then use this function to distinguish cells that have different classify scores (or between train and query cells). You could choose a specific cell type and choose a threshold to apply it.
+Then use this function to distinguish cells that have different classify scores (or between train and query cells). You could choose a specific cell type and choose a threshold to apply it. In this part, youcould choose those cells better classified than threshold with ```upper=True``` or worse classified with ```upper=False```.
 
 ```python
-adRanking = select_type_pairs(expTrain, adQuery, 'endothelial cell', 0.4, 'cell_ontology_class')
+adRanking = pySCN.select_type_pairs(expTrain, adQuery, 'endothelial cell', 0.4, upper=True, 'cell_ontology_class')
 ```
 
 After this function, you'll get a anndata object with varm showing log2foldchanges and pvalues of differential genes.

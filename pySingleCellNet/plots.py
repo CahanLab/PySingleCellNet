@@ -167,10 +167,10 @@ def plot_umap(aData, dLevel="category"):
     plt.ylabel("Component 2")
     plt.legend(loc="center left", ncol=2, bbox_to_anchor=(1, 0.5))
 
-def hm_mgenes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], list_of_training_to_show=[], number_of_genes_toshow=3, query_annotation_togroup='SCN_result', training_annotation_togroup='SCN_result', save = False):
+def hm_genes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], list_of_training_to_show=[], number_of_genes_toshow=3, query_annotation_togroup='SCN_class', training_annotation_togroup='SCN_class', split_show=False, save = False):
     if list_of_types_toshow.__len__() == list_of_training_to_show.__len__():
         if list_of_types_toshow.__len__() == 0:
-            list_of_types_toshow = np.unique(adQuery.obs['SCN_result'])
+            list_of_types_toshow = np.unique(adQuery.obs['SCN_class'])
             num = list_of_types_toshow.__len__()
             list_of_training_to_show = [False for _ in range(num)]
             # Default: all shown and False
@@ -204,19 +204,25 @@ def hm_mgenes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], li
     for i in range(list_of_types_toshow.__len__()):
         type = list_of_types_toshow[i]
         for j in range(np.size(MQ, 0)):
-            if adQuery.obs['SCN_result'][j] == type:
+            if adQuery.obs['SCN_class'][j] == type:
                 list_1.append(j)
                 SCN_annot.append(type)
-                annot.append(adQuery.obs[query_annotation_togroup][j])
+                if split_show:
+                    annot.append(adQuery.obs[query_annotation_togroup][j]+'_Query')
+                else:
+                    annot.append(adQuery.obs[query_annotation_togroup][j])
 
     for i in range(list_of_training_to_show.__len__()):
         type = list_of_types_toshow[i]            
         if list_of_training_to_show[i]:
             for j in range(np.size(MT, 0)):
-                if adTrain.obs['SCN_result'][j] == type:
+                if adTrain.obs['SCN_class'][j] == type:
                     list_2.append(j)
                     SCN_annot.append(type)
-                    annot.append(adTrain.obs[training_annotation_togroup][j])
+                    if split_show:
+                        annot.append(adTrain.obs[training_annotation_togroup][j]+'_Train')
+                    else:
+                        annot.append(adTrain.obs[training_annotation_togroup][j])
         else:
             pass
     
@@ -236,7 +242,7 @@ def hm_mgenes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], li
     New_Mat = csr_matrix(Mdense)
     adTrans = sc.AnnData(New_Mat)
 
-    adTrans.obs['SCN_result'] = SCN_annot.values
+    adTrans.obs['SCN_class'] = SCN_annot.values
     adTrans.obs['Cell_Type'] = annot.values
     adTrans.var_names = adQuery.var_names
 

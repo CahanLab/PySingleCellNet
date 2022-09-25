@@ -165,16 +165,16 @@ def scn_train_edit(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100
     tspRF=sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees, stratify=stratify)
     return [cgenesA, xpairs, tspRF, cgenes_list]
 
-def add_classRes_result(adata, adClassRes, copy=False):
-    # cNames = adClassRes.var_names
-    # for cname in cNames:
-    #     adata.obs[cname] = adClassRes[:,cname].X
-    # adata.obs['category'] = adClassRes.obs['category']
-    adata.obs['SCN_result'] = adClassRes.obs['SCN_class']
-    return adata if copy else None
+# def add_classRes_result(adata, adClassRes, copy=False):
+#     # cNames = adClassRes.var_names
+#     # for cname in cNames:
+#     #     adata.obs[cname] = adClassRes[:,cname].X
+#     # adata.obs['category'] = adClassRes.obs['category']
+#     adata.obs['SCN_result'] = adClassRes.obs['SCN_class']
+#     return adata if copy else None
 
 def add_training_dlevel(adata, dlevel):
-    adata.obs['SCN_result'] = adata.obs[dlevel]
+    adata.obs['SCN_class'] = adata.obs[dlevel]
     return adata
 
 def select_type_pairs(adTrain, adQuery, Cell_Type, threshold, upper = True, dlevel = 'cell_ontology_class'):
