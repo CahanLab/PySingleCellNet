@@ -177,7 +177,7 @@ def add_training_dlevel(adata, dlevel):
     adata.obs['SCN_result'] = adata.obs[dlevel]
     return adata
 
-def select_type_pairs(adTrain, adQuery, Cell_Type, threshold, dlevel = 'cell_ontology_class'):
+def select_type_pairs(adTrain, adQuery, Cell_Type, threshold, upper = True, dlevel = 'cell_ontology_class'):
     ind_train = []
     ind_query = []
 
@@ -186,8 +186,12 @@ def select_type_pairs(adTrain, adQuery, Cell_Type, threshold, dlevel = 'cell_ont
             ind_train.append(i)
 
     for i in range(adQuery.obs.shape[0]):
-        if adQuery.obs['SCN_class'][i] == Cell_Type and adQuery.obs[Cell_Type][i] >= threshold:
-            ind_query.append(i)
+        if upper:
+            if adQuery.obs['SCN_class'][i] == Cell_Type and adQuery.obs[Cell_Type][i] >= threshold:
+                ind_query.append(i)
+        else:
+            if adQuery.obs['SCN_class'][i] == Cell_Type and adQuery.obs[Cell_Type][i] <= threshold:
+                ind_query.append(i)
 
     
     if type(adTrain.X) is csr_matrix:
