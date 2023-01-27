@@ -78,7 +78,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
     pdTrain= query_transform(expRaw.loc[:,cgenesA], xpairs)
     print("Finished pair transforming the data\n")
     tspRF=sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees, stratify=stratify)
-    return [cgenesA, xpairs, tspRF]
+    return [cgenesA, xpairs, tspRF, cgenes_list]
 
 def scn_classify(adata, cgenes, xpairs, rf_tsp, nrand = 0 ):
     classRes = scn_predict(cgenes, xpairs, rf_tsp, adata, nrand = nrand)
@@ -118,3 +118,48 @@ def rf_classPredict(rfObj,expQuery,numRand=50):
         expQuery=pd.concat([expQuery, randDat])
     xpreds= pd.DataFrame(rfObj.predict_proba(expQuery), columns= rfObj.classes_, index=expQuery.index)
     return xpreds
+
+def scn_train_edit(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=True, normalization = True, include_all_genes = False):
+    warnings.filterwarnings('ignore')
+    stTrain= aTrain.obs
+    
+    expRaw = aTrain.to_df()
+    expRaw = expRaw.loc[stTrain.index.values]
+
+    adNorm = aTrain.copy()
+    if normalization == True:
+        sc.pp.normalize_per_cell(adNorm, counts_per_cell_after=counts_per_cell_after)
+        sc.pp.log1p(adNorm)
+
+        print("HVG")
+        if limitToHVG:
+            sc.pp.highly_variable_genes(adNorm, min_mean=0.0125, max_mean=4, min_disp=0.5)
+            adNorm = adNorm[:, adNorm.var.highly_variable]
+
+        sc.pp.scale(adNorm, max_value=scaleMax)
+
+    expTnorm = adNorm.to_df()
+    expTnorm=expTnorm.loc[stTrain.index.values]
+
+    ### expTnorm= pd.DataFrame(data=aTrain.X,  index= aTrain.obs.index.values, columns= aTrain.var.index.values)
+    ### expTnorm=expTnorm.loc[stTrain.index.values]
+    print("Matrix normalized")
+    ### cgenesA, grps, cgenes_list =findClassyGenes(expTnorm,stTrain, dLevel = dLevel, topX = nTopGenes)
+    if include_all_genes == False:
+        cgenesA, grps, cgenes_list =findClassyGenes_edit(adNorm, dLevel = dLevel, topX = nTopGenes)
+    else: 
+        cgenesA = np.array(aTrain.var.index)
+        grps = aTrain.obs[dLevel]
+        cgenes_list = dict()
+        for g in np.unique(grps):
+            cgenes_list[g] = cgenesA
+
+    print("There are ", len(cgenesA), " classification genes\n")
+    ### xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
+    xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
+
+    print("There are", len(xpairs), "top gene pairs\n")
+    pdTrain= query_transform(expRaw.loc[:,cgenesA], xpairs)
+    print("Finished pair transforming the data\n")
+    tspRF=sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees, stratify=stratify)
+    return [cgenesA, xpairs, tspRF, cgenes_list]
