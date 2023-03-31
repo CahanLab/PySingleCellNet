@@ -135,6 +135,7 @@ def query_transform(expMat, genePairs):
     ans.columns = genePairs
     return(ans)
 
+# I think this is not used
 def pair_transform(expMat):
     pTab=makePairTab(expMat)
     npairs = len(pTab.index)
@@ -207,24 +208,11 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
             tmpPdat=ptSmall(expDat, pairTab)
             tmpAns=findBestPairs(sc_testPattern(myPatternG[g],tmpPdat), topX)
             res.append(tmpAns)
+            # to add here also select from cgenes_list[-g]
         return np.unique(np.array(res).flatten())
 
-def findClassyGenes(expDat, sampTab,dLevel, topX=25, dThresh=0, alpha1=0.05,alpha2=.001, mu=2):
-    gsTrain=sc_statTab(expDat, dThresh=dThresh)
-    ggenes=sc_filterGenes(gsTrain, alpha1=alpha1, alpha2=alpha2, mu=mu)
-    grps= sampTab[dLevel]
-    xdiff=gnrAll(expDat.loc[:,ggenes], grps)
-    groups=np.unique(grps)
-    res=[]
-    cgenes={}
-    for g in groups:
-        temp=getClassGenes(xdiff[g], topX)
-        cgenes[g]=temp
-        res.append(temp)
-    cgenes2=np.unique(np.array(res).flatten())
-    return [cgenes2, grps, cgenes]
 
-def findClassyGenes_edit(adDat, dLevel, topX=25):
+def findClassyGenes(adDat, dLevel, topX=25):
     adTemp = adDat.copy()
     grps = adDat.obs[dLevel]
     groups = np.unique(grps)

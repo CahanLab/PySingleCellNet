@@ -3,3 +3,4 @@ inProgressFunctions/
 build/ 
 dist/
 pySingleCellNet.egg-info/
+__pycache__/
