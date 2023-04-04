@@ -143,7 +143,7 @@ def rf_classPredict(rfObj,expQuery,numRand=50):
     xpreds= pd.DataFrame(rfObj.predict_proba(expQuery), columns= rfObj.classes_, index=expQuery.index)
     return xpreds
 
-def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=True, normalization = True, include_all_genes = False):
+def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=True, normalization = True, include_all_genes = False, propOther=0.5):
     warnings.filterwarnings('ignore')
     stTrain= aTrain.obs
     
@@ -157,7 +157,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
 
         print("HVG")
         if limitToHVG:
-            sc.pp.highly_variable_genes(adNorm, min_mean=0.0125, max_mean=4, min_disp=0.5)
+            sc.pp.highly_variable_genes(adNorm, min_mean=0.0125, max_mean=6, min_disp=0.25)
             adNorm = adNorm[:, adNorm.var.highly_variable]
 
         sc.pp.scale(adNorm, max_value=scaleMax)
@@ -180,7 +180,7 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
 
     print("There are ", len(cgenesA), " classification genes\n")
     ### xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
-    xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000)
+    xpairs= ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000, propOther=propOther)
 
     print("There are", len(xpairs), "top gene pairs\n")
     pdTrain= query_transform(expRaw.loc[:,cgenesA], xpairs)

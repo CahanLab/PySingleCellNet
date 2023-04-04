@@ -4,6 +4,7 @@ import scanpy as sc
 from sklearn import linear_model
 from itertools import combinations
 from .stats import * 
+import random as rand 
 
 ### from stats import * 
 
@@ -164,7 +165,7 @@ def gnrBP(expDat,cellLabels,topX=50):
         ans[levels[i]]=tmpAns
     return ans
 
-def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, quickPairs = True):
+def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, quickPairs = True, propOther: float = 0.5):
     if not quickPairs:
         genes=expDat.columns.values
         grps=np.unique(cell_labels)
@@ -198,6 +199,7 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
 
     else:
         myPatternG= sc_sampR_to_pattern(cell_labels)
+        maxOther = int(np.ceil(propOther * topX))
         res=[]
         grps=np.unique(cell_labels)
         for g in grps:
@@ -209,7 +211,22 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
             tmpAns=findBestPairs(sc_testPattern(myPatternG[g],tmpPdat), topX)
             res.append(tmpAns)
             # to add here also select from cgenes_list[-g]
-        return np.unique(np.array(res).flatten())
+            notg = [item for item in grps if item != g]
+            for ng in notg:
+                ng_genes = cgenes_list[ng]
+                g1 = list(set(genes).difference(set(ng_genes)))
+                g2 = list(set(ng_genes).difference(set(genes)))
+                lastIndex = min([len(g1), len(g2), maxOther])
+                if lastIndex > 0:
+                    g1 = rand.sample(g1, lastIndex)
+                    g2 = rand.sample(g2, lastIndex)
+                    labels = ['genes1', 'genes2']
+                    pTab = pd.DataFrame(data = list(zip(g1[0:lastIndex], g2[0:lastIndex])), columns = labels)
+                    pxxx = pTab['genes1'] + '_' + pTab['genes2']
+                    res.append( pxxx.to_numpy(dtype="<U32") )
+
+                
+        return np.unique( np.concatenate(res) )
 
 
 def findClassyGenes(adDat, dLevel, topX=25):
