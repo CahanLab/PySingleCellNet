@@ -205,12 +205,6 @@ def reduce_cells(
 
     return adata2
 
-
-import numpy as np
-import pandas as pd
-import scanpy as sc
-from anndata import AnnData
-
 def create_hybrid_cells(
     adata: AnnData,
     clusters: list,
@@ -263,8 +257,6 @@ def create_hybrid_cells(
     hybrid = ad.concat(hybrid_list, join='outer')
 
     return hybrid
-
-
 
 
 

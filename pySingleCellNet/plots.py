@@ -12,25 +12,22 @@ from scipy.sparse import csr_matrix
 
 
 
-def heatmap_scn_scores(adata: AnnData, groupby: str, cbar_auto: str = False):    
+def heatmap_scn_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1):    
     adTemp = AnnData(adata.obsm['SCN_score'], obs=adata.obs)
     adTemp.obs[groupby] = adata.obs[groupby]
-    #if cbar_auto:
-    #    sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, cmap='viridis', dendrogram=False, swap_axes=True)
-    #else:
-    #    sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, cmap='viridis', dendrogram=False, swap_axes=True, vim=0, vmax=1)
-    sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, cmap='viridis', dendrogram=False, swap_axes=True)
+    # guess at appropriate dimensions
+    fsize = [5, 6]
+    plt.rcParams['figure.subplot.bottom'] = 0.25
+    sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, cmap='viridis', dendrogram=False, swap_axes=True, vmin = vmin, vmax = vmax, figsize=fsize)
 
 def dotplot_scn_scores(adata: AnnData, groupby: str, expression_cutoff = 0.1):    
     adTemp = AnnData(adata.obsm['SCN_score'], obs=adata.obs)
     adTemp.obs[groupby] = adata.obs[groupby]
     sc.pl.dotplot(adTemp, adTemp.var_names.values, groupby=groupby, expression_cutoff=expression_cutoff, cmap='viridis', colorbar_title="SCN score")
 
-def umap_scn_scores(adata: AnnData, groupby: str, expression_cutoff = 0.1):    
+def umap_scn_scores(adata: AnnData, scn_classes: list):    
     adTemp = AnnData(adata.obsm['SCN_score'], obs=adata.obs)
-    adTemp.obs[groupby] = adata.obs[groupby].copy()
-    sc.pl.dotplot(adTemp, adTemp.var_names.values, groupby=groupby, expression_cutoff=expression_cutoff, cmap='viridis', colorbar_title="SCN score")
-
+    sc.pl.umap(adTemp,color=scn_classes, alpha=.75, s=10)
 
 def hm_genes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], list_of_training_to_show=[], number_of_genes_toshow=3, query_annotation_togroup='SCN_class', training_annotation_togroup='SCN_class', split_show=False, save = False):
     if list_of_types_toshow.__len__() == list_of_training_to_show.__len__():
