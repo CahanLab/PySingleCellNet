@@ -14,15 +14,26 @@ release = 'Oct 16, 2020'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['myst_parser']
+extensions = [
+    'sphinx.ext.autodoc',
+#    'myst_parser',
+    'myst_nb'
+]
 
 templates_path = ['_templates']
 exclude_patterns = []
 
 
-
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'sphinx_rtd_theme'
+#html_theme = 'sphinx_rtd_theme'
+html_theme = 'sphinx_book_theme'
 html_static_path = ['_static']
+
+# import os
+# import sys
+# sys.path.insert(0, os.path.abspath('../path/to/your/project'))
+
+myst_enable_extensions = ["colon_fence"]
+jupyter_execute_notebooks = "off"

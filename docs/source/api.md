@@ -1,4 +1,10 @@
 # API
 
-Here is the API
+```{eval-rst}
+.. automodule:: PySingleCellNet
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+
 

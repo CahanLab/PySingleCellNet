@@ -9,7 +9,19 @@ import umap
 import anndata as ad
 from anndata import AnnData
 from scipy.sparse import csr_matrix
+from sklearn.metrics import f1_score
 
+def barplot_classifier_f1(adata: AnnData, ground_truth: str = "celltype", class_prediction: str = "SCN_class"):
+    fscore = f1_score(adata.obs[ground_truth], adata.obs[class_prediction], average=None)
+    cates = list(adata.obs[ground_truth].cat.categories)
+    f1_score_dict = {class_label: f1_score_x for class_label, f1_score_x in zip(cates, fscore)}
+    plt.rcParams['figure.constrained_layout.use'] = True
+    sns.set_theme(style="whitegrid")
+    sns.barplot(x=list(f1_score_dict.values()), y=list(f1_score_dict.keys()))
+    plt.xlabel('F1-Score')
+    plt.title('F1-Scores per Class')
+    plt.xlim(0, 1.1) # Set x-axis limits to ensure visibility of all bars 
+    plt.show()
 
 
 def heatmap_scn_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1):    
