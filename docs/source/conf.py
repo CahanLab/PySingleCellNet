@@ -15,14 +15,25 @@ release = 'Oct 16, 2020'
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    'sphinx.ext.autodoc',
-#    'myst_parser',
+ #   'sphinx.ext.autodoc',
+    'autodoc2',
     'myst_nb'
 ]
 
 templates_path = ['_templates']
 exclude_patterns = []
 
+autodoc2_packages = [
+    "../pySingleCellNet"
+]
+
+autodoc2_render_plugin = "myst"
+autodoc2_output_dir = "apidocs"
+
+suppress_warnings = [
+    "autodoc2.*",  # suppress all
+    "autodoc2.config_error",  # suppress specific
+]
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

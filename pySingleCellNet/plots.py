@@ -39,7 +39,8 @@ def dotplot_scn_scores(adata: AnnData, groupby: str, expression_cutoff = 0.1):
 
 def umap_scn_scores(adata: AnnData, scn_classes: list):    
     adTemp = AnnData(adata.obsm['SCN_score'], obs=adata.obs)
-    sc.pl.umap(adTemp,color=scn_classes, alpha=.75, s=10)
+    adTemp.obsm['X_umap'] = adata.obsm['X_umap'].copy()
+    sc.pl.umap(adTemp,color=scn_classes, alpha=.75, s=10, vmin=0, vmax=1)
 
 def hm_genes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], list_of_training_to_show=[], number_of_genes_toshow=3, query_annotation_togroup='SCN_class', training_annotation_togroup='SCN_class', split_show=False, save = False):
     if list_of_types_toshow.__len__() == list_of_training_to_show.__len__():

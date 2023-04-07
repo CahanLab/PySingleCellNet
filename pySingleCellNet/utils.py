@@ -4,6 +4,48 @@ import pandas as pd
 from anndata import AnnData
 import scanpy as sc
 
+
+
+
+def limit_anndata_to_common_genes(anndata_list):
+    # Find the set of common genes across all anndata objects
+    common_genes = set(anndata_list[0].var_names)
+    for adata in anndata_list[1:]:
+        common_genes.intersection_update(set(adata.var_names))
+    
+    # Limit the anndata objects to the common genes
+    if common_genes:
+        for adata in anndata_list:
+            adata._inplace_subset_var(list(common_genes))
+
+    #return anndata_list
+    #return common_genes
+
+
+def read_broken_geo_mtx(path: str, prefix: str) -> AnnData:
+    # assumes that obs and var in .mtx _could_ be switched
+    # determines which is correct by size of genes.tsv and barcodes.tsv
+
+    adata = sc.read_mtx(path + prefix + "matrix.mtx")
+    cell_anno = pd.read_csv(path + prefix + "barcodes.tsv", delimiter='\t', header=None)
+    n_cells = cell_anno.shape[0]
+    cell_anno.rename(columns={0:'cell_id'},inplace=True)
+
+    gene_anno = pd.read_csv(path + prefix + "genes.tsv", header=None, delimiter='\t')
+    n_genes = gene_anno.shape[0]
+    gene_anno.rename(columns={0:'gene'},inplace=True)
+
+    if adata.shape[0] == n_genes:
+        adata = adata.T
+
+    adata.obs = cell_anno.copy()
+    adata.obs_names = adata.obs['cell_id']
+    adata.var = gene_anno.copy()
+    adata.var_names = adata.var['gene']
+    return adata
+
+
+
 def mito_rib(adQ: AnnData, species: str = "MM", clean: bool = True) -> AnnData:
     """
     Calculate mitochondrial and ribosomal QC metrics and add them to the `.var` attribute of the AnnData object.
