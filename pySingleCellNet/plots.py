@@ -10,8 +10,70 @@ import anndata as ad
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
+import altair as alt
+alt.data_transformers.disable_max_rows()
+
+def stackedbar_categories(
+    ad_list: list, 
+    adata_names: list, # a sample id or name to disinguish anndatas in plot
+    celltype_groupby: str = "SCN_class", # what to group the cells on
+    category_groupby: str = "SCN_class_type", # what to split celltypes on
+    color_dict: dict = {'Hybrid': 'lightgreen','None': 'peachpuff', 'Singular': 'powderblue'}
+):
+    
+    # make a pd of celltype, category, sample_id
+    obs_all = pd.DataFrame()
+    i = 0
+    for adTemp in ad_list:
+        obsTmp = adTemp.obs[ [celltype_groupby, category_groupby] ].copy()
+        obsTmp["source"] = adata_names[i]
+        obs_all = pd.concat([obs_all, obsTmp])
+        i = i + 1
+
+    xcar = alt.Chart(obs_all).mark_bar().encode(
+        column=alt.Column('source',sort=["HeldOut", "Query 1"]),
+        x=alt.X('count()', stack="normalize",axis=alt.Axis(format='%', title='Percent of cells')),
+        y=celltype_groupby,
+        color=alt.Color(
+            category_groupby,
+            # sort=["Singular", "Hybrid", "None"], 
+            scale=alt.Scale(domain=list(color_dict.keys()),range=list(color_dict.values()))
+        )
+    )
+    return xcar
+
 
 def barplot_classifier_f1(adata: AnnData, ground_truth: str = "celltype", class_prediction: str = "SCN_class"):
+    fscore = f1_score(adata.obs[ground_truth], adata.obs[class_prediction], average=None, labels = adata.obs[ground_truth].cat.categories)
+    cates = list(adata.obs[ground_truth].cat.categories)
+    f1_score_dict = {class_label: f1_score_x for class_label, f1_score_x in zip(cates, fscore)}
+    
+    # Calculate the number of observations per class
+    class_counts = adata.obs[ground_truth].value_counts().to_dict()
+
+    plt.rcParams['figure.constrained_layout.use'] = True
+    sns.set_theme(style="whitegrid")
+    ax = sns.barplot(x=list(f1_score_dict.values()), y=list(f1_score_dict.keys()))
+    plt.xlabel('F1-Score')
+    plt.title('F1-Scores per Class')
+    plt.xlim(0, 1.1) # Set x-axis limits to ensure visibility of all bars
+
+    # Add the number of observations per class as text within the barplot
+    for i, bar in enumerate(ax.containers[0]):
+        width = bar.get_width()
+        print(f"{width}")
+        label = f"n = {class_counts[cates[i]]}"
+        fcolor = "white"
+        if width < 0.20:
+            fcolor = "black"
+
+        ax.text( 0.03, bar.get_y() + bar.get_height() / 2, label, ha='left', va='center', color = fcolor)
+
+    plt.show()
+
+
+
+def barplot_classifier_f1_old(adata: AnnData, ground_truth: str = "celltype", class_prediction: str = "SCN_class"):
     fscore = f1_score(adata.obs[ground_truth], adata.obs[class_prediction], average=None)
     cates = list(adata.obs[ground_truth].cat.categories)
     f1_score_dict = {class_label: f1_score_x for class_label, f1_score_x in zip(cates, fscore)}

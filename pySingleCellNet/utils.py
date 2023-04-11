@@ -5,8 +5,6 @@ from anndata import AnnData
 import scanpy as sc
 
 
-
-
 def limit_anndata_to_common_genes(anndata_list):
     # Find the set of common genes across all anndata objects
     common_genes = set(anndata_list[0].var_names)

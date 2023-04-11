@@ -4,3 +4,4 @@ from .tsp_rf import *
 from .scn_train import *
 from .scn_assess import *
 from .plots import *
+from .postclass_analysis import *

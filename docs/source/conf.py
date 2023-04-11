@@ -16,7 +16,8 @@ release = 'Oct 16, 2020'
 
 extensions = [
  #   'sphinx.ext.autodoc',
-    'autodoc2',
+ #   'autodoc2',
+    'sphinx_copybutton',
     'myst_nb'
 ]
 
@@ -41,6 +42,8 @@ suppress_warnings = [
 #html_theme = 'sphinx_rtd_theme'
 html_theme = 'sphinx_book_theme'
 html_static_path = ['_static']
+html_logo = "_static/pySCN_tree.png"
+
 
 # import os
 # import sys
