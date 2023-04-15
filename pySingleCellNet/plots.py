@@ -11,7 +11,59 @@ from anndata import AnnData
 from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
 import altair as alt
+from .utils import *
+
 alt.data_transformers.disable_max_rows()
+
+
+def dotplot_diff_gene(
+    adata: AnnData,
+    diff_gene_dict: dict,
+    num_genes: int = 10,
+    celltype_groupby: str = "SCN_class",
+    category_groupby: str = "SCN_class_type",
+    category_names: str = ["None", "Singular"],
+    celltype_names: list = []
+):
+
+    # remove celltypes unspecified in diff_gene_dict
+    dd_dict = diff_gene_dict['geneTab_dict']
+    tokeep = list(dd_dict.keys())
+
+    # also remove cell_types not listed in celltype_names
+    # default for celltype_names is all celltypes included in dd_dict
+    if len(celltype_names) > 0:
+        celltype_names = list(set(celltype_names).intersection(set(tokeep)))
+    else:
+        celltype_names = tokeep
+
+    adNew = adata.copy()
+    # adNew = adNew[adNew.obs[celltype_groupby].isin(tokeep)].copy()
+    adNew = adNew[adNew.obs[celltype_groupby].isin(celltype_names)].copy()
+    
+    # remove categories unspecified in diff_gene_dict
+    category_names = diff_gene_dict['category_names']
+    adNew = adNew[adNew.obs[category_groupby].isin(category_names)].copy()
+
+    
+
+    # add column 'ct_by_cat' to obs that indicates celltype X category
+    adNew.obs['ct_by_cat'] = adNew.obs[celltype_groupby].astype(str) + "_X_" + adNew.obs[category_groupby].astype(str)
+    
+    # define dict of marker genes based on threshold
+    genes_to_plot = dict()
+    for celltype in celltype_names:
+        print(f"{celltype}")
+        for scn_category in category_names:
+            print(f"{scn_category}")
+            genes_to_plot[celltype + "_X_" + scn_category] = pull_out_genes(diff_gene_dict, cell_type = celltype, category = scn_category, num_genes = num_genes) 
+
+    # return adNew, genes_to_plot
+    plt.rcParams['figure.constrained_layout.use'] = True
+    xplot = sc.pl.DotPlot(adNew, genes_to_plot, 'ct_by_cat', cmap='RdPu', var_group_rotation = 0) #, dendrogram=True,ax=ax2, show=False)
+    xplot.swap_axes(True) # see sc.pl.DotPlot docs for useful info
+    return xplot
+    
 
 def stackedbar_categories(
     ad_list: list, 
@@ -69,20 +121,6 @@ def barplot_classifier_f1(adata: AnnData, ground_truth: str = "celltype", class_
 
         ax.text( 0.03, bar.get_y() + bar.get_height() / 2, label, ha='left', va='center', color = fcolor)
 
-    plt.show()
-
-
-
-def barplot_classifier_f1_old(adata: AnnData, ground_truth: str = "celltype", class_prediction: str = "SCN_class"):
-    fscore = f1_score(adata.obs[ground_truth], adata.obs[class_prediction], average=None)
-    cates = list(adata.obs[ground_truth].cat.categories)
-    f1_score_dict = {class_label: f1_score_x for class_label, f1_score_x in zip(cates, fscore)}
-    plt.rcParams['figure.constrained_layout.use'] = True
-    sns.set_theme(style="whitegrid")
-    sns.barplot(x=list(f1_score_dict.values()), y=list(f1_score_dict.keys()))
-    plt.xlabel('F1-Score')
-    plt.title('F1-Scores per Class')
-    plt.xlim(0, 1.1) # Set x-axis limits to ensure visibility of all bars 
     plt.show()
 
 

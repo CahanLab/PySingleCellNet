@@ -5,6 +5,50 @@ from anndata import AnnData
 import scanpy as sc
 
 
+def pull_out_genes(
+    diff_genes_dict: dict, 
+    cell_type: str,
+    category: str, 
+    num_genes: int = 0,
+    orderby = "logfoldchanges", 
+    threshold = 0.01) -> list:
+
+    ans = []
+    #### xdat = diff_genes_dict[cell_type]
+    xdat = diff_genes_dict['geneTab_dict'][cell_type]
+    xdat = xdat[xdat['pvals_adj'] < threshold].copy()
+
+    category_names = diff_genes_dict['category_names']
+    category_index = category_names.index(category)
+    
+    # any genes left?
+    if xdat.shape[0] > 0:
+
+        if num_genes == 0:
+            num_genes = xdat.shape[0]
+
+        if category_index == 0:
+            xdat.sort_values(by=[orderby], inplace=True, ascending=False)
+        else:
+            xdat.sort_values(by=[orderby], inplace=True, ascending=True)
+
+        ans = list(xdat.iloc[0:num_genes]["names"])
+
+    return ans
+
+
+def convert_rankGeneGroup_to_df( rgg: dict, list_of_keys: list) -> pd.DataFrame:
+# Annoying but necessary function to deal with recarray format of .uns['rank_genes_groups'] to make sorting/extracting easier
+
+    arrays_dict = {}
+    for key in list_of_keys:
+        recarray = rgg[key]
+        field_name = recarray.dtype.names[0]  # Get the first field name
+        arrays_dict[key] = recarray[field_name]
+
+    return pd.DataFrame(arrays_dict)
+
+
 def limit_anndata_to_common_genes(anndata_list):
     # Find the set of common genes across all anndata objects
     common_genes = set(anndata_list[0].var_names)
