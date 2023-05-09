@@ -91,7 +91,7 @@ def scn_classify(adata, cgenes, xpairs, rf_tsp, nrand = 0 ):
 def add_classRes(adata: AnnData, adClassRes, copy=False) -> AnnData:
     cNames = adClassRes.var_names
     for cname in cNames:
-        adata.obs[cname] = adClassRes[:,cname].X
+        adata.obs[cname] = adClassRes[:,cname].X.toarray()
     # adata.obs['category'] = adClassRes.obs['category']
     adata.obs['SCN_class'] = adClassRes.obs['SCN_class']
     return adata if copy else None
