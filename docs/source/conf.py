@@ -17,10 +17,13 @@ release = 'Oct 16, 2020'
 extensions = [
  #   'sphinx.ext.autodoc',
  #   'autodoc2',
-    'sphinx_copybutton',
-    'myst_nb'
+    'myst_nb',
+    'sphinxcontrib.bibtex',
+    'sphinx_copybutton'
 ]
 
+bibtex_bibfiles = ['SCN_refs.bib']
+bibtex_reference_style = 'author_year'
 templates_path = ['_templates']
 exclude_patterns = []
 

@@ -4,6 +4,29 @@ import pandas as pd
 from anndata import AnnData
 import scanpy as sc
 
+def read_gmt(file_path: str) -> dict:
+    """
+    Read a Gene Matrix Transposed (GMT) file and return a dictionary of gene sets.
+
+    Args:
+        file_path (str): Path to the GMT file.
+
+    Returns:
+        dict: A dictionary where keys are gene set names and values are lists of associated genes.
+    """
+    gene_sets = {}
+    
+    with open(file_path, 'r') as gmt_file:
+        for line in gmt_file:
+            columns = line.strip().split('\t')
+            gene_set_name = columns[0]
+            description = columns[1]  # This can be ignored if not needed
+            genes = columns[2:]
+            
+            gene_sets[gene_set_name] = genes
+            
+    return gene_sets
+
 
 def pull_out_genes(
     diff_genes_dict: dict, 

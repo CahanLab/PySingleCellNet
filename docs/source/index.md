@@ -1,6 +1,12 @@
 
-```{include} ../../README.md
-```
+# PySingleCellNet: classify scRNAseq data in Python
+
+SingleCellNet predicts the 'cell type' of query scRNA-seq data by Random forest multi-class classification. See {ref}`tan_2019` for more details. It was originally written in R. PySCN is the Python version which includes functionality to aid in the analysis of engineered cell populations (i.e. cells derived via directed differentiation of pluripotent stem cells or via direct conversion).
+
+[github]: https://github.com/pcahan1/PySingleCellNet
+[original version]: https://github.com/pcahan1/SingleCellNet
+
+
 
 ```{toctree}
 :maxdepth: 2
