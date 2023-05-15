@@ -18,7 +18,7 @@ extensions = [
  #   'sphinx.ext.autodoc',
  #   'autodoc2',
     'myst_nb',
-    'sphinxcontrib.bibtex',
+#     'sphinxcontrib.bibtex',
     'sphinx_copybutton'
 ]
 
@@ -31,12 +31,12 @@ autodoc2_packages = [
     "../pySingleCellNet"
 ]
 
-autodoc2_render_plugin = "myst"
-autodoc2_output_dir = "apidocs"
+# autodoc2_render_plugin = "myst"
+# autodoc2_output_dir = "apidocs"
 
 suppress_warnings = [
-    "autodoc2.*",  # suppress all
-    "autodoc2.config_error",  # suppress specific
+#    "autodoc2.*",  # suppress all
+#    "autodoc2.config_error",  # suppress specific
 ]
 
 # -- Options for HTML output -------------------------------------------------
