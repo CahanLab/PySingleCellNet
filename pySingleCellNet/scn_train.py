@@ -49,7 +49,10 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
 
         print("HVG")
         if limitToHVG:
-            sc.pp.highly_variable_genes(adNorm, min_mean=0.0125, max_mean=4, min_disp=0.5)
+            try:
+                sc.pp.highly_variable_genes(adNorm, min_mean=0.0125, max_mean=4, min_disp=0.5)
+            except Exception as e:
+                raise ValueError(f"PySCN encountered an error when selecting variable genes. This may be avoided if you do not call scale or regress_out on the training data. Original error text: {repr(e)}") 
             adNorm = adNorm[:, adNorm.var.highly_variable]
 
         sc.pp.scale(adNorm, max_value=scaleMax)
