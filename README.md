@@ -1,5 +1,7 @@
 
-# pySingleCellNet
+[![Documentation Status](https://readthedocs.org/projects/pysinglecellnet/badge/?version=latest)](https://pysinglecellnet.readthedocs.io/en/latest/?badge=latest)
+
+  # pySingleCellNet
 
 ### Introduction 
 SingleCellNet (SCN) is a tool to perform 'cell typing', or classification of single cell RNA-Seq data. Two nice features of SCN are that it works (1) across species and (2) across platforms. See [the original paper](https://doi.org/10.1016/j.cels.2019.06.004) for more details. This repository contains the Python version of SCN. The [original code](https://github.com/pcahan1/SingleCellNet/) was written in R. 
