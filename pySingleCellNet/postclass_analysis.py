@@ -7,6 +7,157 @@ from scipy.sparse import csr_matrix
 import warnings
 from .utils import *
 from .tsp_rf import *
+import gseapy as gp
+import os
+import anndata
+import pySingleCellNet as pySCN
+
+def merge_for_diffExp(
+    ad1: AnnData,
+    ad2: AnnData,
+    sample_name_1: str,
+    sample_name_2: str,
+    cell_groups = list,
+    cell_group_name: str = "SCN_class",
+    cell_subset_name: str = "SCN_class_type",
+    cell_subset_1: str = "Singular",
+    cell_subset_2: str = "Singular",
+    new_obs_name = "cate_sample"
+) -> AnnData:
+    """
+    Merges two AnnData objects for differential expression analysis.
+
+    The function first filters the two AnnData objects based on the cell subset name and copies them. 
+    Then, it adds a new observation to each AnnData object. After that, it filters the AnnData objects 
+    based on the cell group name. It ensures that the two AnnData objects have the same genes before 
+    concatenating them. The function returns the concatenated AnnData object.
+
+    Args:
+        ad1 (AnnData): First AnnData object.
+        ad2 (AnnData): Second AnnData object.
+        sample_name_1 (str): Name of the first sample.
+        sample_name_2 (str): Name of the second sample.
+        cell_groups (list, optional): List of cell groups. Defaults to list.
+        cell_group_name (str, optional): Name of the cell group. Defaults to "SCN_class".
+        cell_subset_name (str, optional): Name of the cell subset. Defaults to "SCN_class_type".
+        cell_subset_1 (str, optional): First cell subset. Defaults to "Singular".
+        cell_subset_2 (str, optional): Second cell subset. Defaults to "Singular".
+        new_obs_name (str, optional): New observation name. Defaults to "cate_sample".
+
+    Returns:
+        AnnData: The concatenated AnnData object.
+    """
+    adTmp1 = ad1[ad1.obs[cell_subset_name] == cell_subset_1].copy()
+    adTmp2 = ad2[ad2.obs[cell_subset_name] == cell_subset_2].copy()
+
+    adTmp1.obs[new_obs_name] = sample_name_1 + "_" + adTmp1.obs[cell_subset_name]
+    adTmp2.obs[new_obs_name] = sample_name_2 + "_" + adTmp2.obs[cell_subset_name]
+
+    adTmp1 = adTmp1[adTmp1.obs[cell_group_name].isin(cell_groups)]
+    adTmp2 = adTmp2[adTmp2.obs[cell_group_name].isin(cell_groups)]
+
+    pySCN.limit_anndata_to_common_genes([adTmp1, adTmp2])
+    adBoth = anndata.concat([adTmp1, adTmp2])
+    return adBoth
+
+
+# This should return the combined data frames AND an object that can be used to set colors of gsea heatmap
+def combine_gsea_dfs(
+    gsea_dfs: list,
+    df_names: list
+):
+    """
+    Combine multiple GSEA results (add as new renamed columns)
+
+    Args:
+        gsea_dfs: each produced by pySCN.collect_gsea_results_from_dict
+        df_names: abbreviation or name to preprend to columns of corresponding df
+
+    Returns:
+        pd.DataFrame: in which gsea_dfs have been concatenated and column names updated
+        pd.Series: index = column name of ^, value = df_name 
+    """
+    new_column_names = []
+    column_annotations = []
+    gsea_dfs_new = gsea_dfs.copy() 
+    for i in range(len(gsea_dfs_new)):
+        tmp = list(gsea_dfs_new[i].columns)
+        new_cols = [df_names[i] + "_" + s for s in tmp]
+        gsea_dfs_new[i].columns = new_cols
+        tmp_col_anns = [df_names[i]] * gsea_dfs_new[i].shape[1]
+        column_annotations.extend(tmp_col_anns)
+
+    gsea_comb = pd.concat(gsea_dfs_new, axis=1)
+    gsea_comb = gsea_comb.fillna(0)
+
+    my_series = pd.Series(column_annotations, index=list(gsea_comb.columns))
+    return gsea_comb, my_series
+
+
+def gsea_on_diff_gene_dict(
+    diff_gene_dict: dict,
+    gene_set_name: str,
+    gene_set_path: str,
+    path_to_results: str,
+    result_name: str, # this should indicate the data source(s), but omit cell types and categories
+    permutation_num: int = 100,
+    threads: int = 4,
+    seed: int = 3,
+    min_size: int = 10,
+    max_size: int = 500
+) -> dict:
+
+    ans = dict()
+
+    categories = diff_gene_dict['category_names']
+    diff_gene_tables = diff_gene_dict['geneTab_dict']
+    cell_types = list(diff_gene_tables.keys()) # this should be an optional parameter
+
+    for cell_type in cell_types:
+        # run_name = gene_set_name + "::" + cell_type + "_" + categories[0] + "_vs_" + categories[1]
+        out_dir = path_to_results + "/" + result_name + "/" + gene_set_name + "/" + cell_type + "_" + categories[0] + "_vs_" + categories[1]
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # prep data
+        atab = diff_gene_tables[cell_type]
+        atab = atab[['names', 'scores']]
+        atab.columns = ['0', '1']
+
+        pre_res = gp.prerank(rnk=atab, gene_sets=gene_set_path, outdir=out_dir, 
+            permutation_num = permutation_num, ascending = False, threads=threads,  no_plot = True, seed=seed, min_size = min_size, max_size=max_size)
+        ans[cell_type] = pre_res
+
+    return ans
+
+def collect_gsea_results_from_dict(
+    gsea_dict: dict,
+    fdr_thr = 0.25
+):
+    
+    # Initialize set of pathways. The order of these in prerank results and their composition will differ
+    # so we need to get the union first
+
+    pathways = pd.Index([])
+    cell_types = list(gsea_dict.keys())
+
+    for cell_type in cell_types:
+        tmpRes = gsea_dict[cell_type].res2d
+        gene_set_names = list(tmpRes['Term'])
+        pathways = pathways.union(gene_set_names)
+        
+    # initialize an empty results data.frame
+    nes_df = pd.DataFrame(0, columns = cell_types, index=pathways)
+
+    # 
+    for cell_type in cell_types:
+        ct_df = gsea_dict[cell_type].res2d
+        ct_df.index = ct_df['Term']
+        ct_df.loc[lambda df: df['FDR q-val'] > fdr_thr, "NES"] = 0
+        # nes_df.loc[ct_df.index,cell_type] = ct_df.loc[:,"NES"]
+        nes_df[cell_type] = ct_df["NES"]
+
+    nes_df = nes_df.apply(pd.to_numeric, errors='coerce')
+    return nes_df
 
 
 def make_diff_gene_dict(
@@ -198,6 +349,9 @@ def comp_ct_thresh(adata_c: AnnData, qTile: int = 0.05) -> pd.DataFrame:
             thrs.loc[[ct], [0]] = np.quantile(tempscores, q = qTile)
     
         return thrs
+
+
+
 
 
 def select_type_pairs(adTrain, adQuery, Cell_Type, threshold, upper = True, dlevel = 'cell_ontology_class'):

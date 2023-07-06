@@ -3,6 +3,71 @@ import numpy as np
 import pandas as pd
 from anndata import AnnData
 import scanpy as sc
+import mygene
+
+# from my friend ChatGPT:
+import mygene
+import numpy as np
+
+def convert_ensembl_to_symbol(adata, batch_size=1000):
+    mg = mygene.MyGeneInfo()
+
+    ensembl_ids = adata.var_names.tolist()
+    total_ids = len(ensembl_ids)
+    chunks = [ensembl_ids[i:i + batch_size] for i in range(0, total_ids, batch_size)]
+
+    id_symbol_dict = {}
+
+    # Querying in chunks
+    for chunk in chunks:
+        result = mg.querymany(chunk, scopes='ensembl.gene', fields='symbol', species='mouse')
+        chunk_dict = {item['query']: item['symbol'] for item in result if 'symbol' in item}
+        id_symbol_dict.update(chunk_dict)
+
+    # Find IDs without a symbol
+    unmapped_ids = set(ensembl_ids) - set(id_symbol_dict.keys())
+    print(f"Found {len(unmapped_ids)} Ensembl IDs without a gene symbol")
+
+    # Remove unmapped IDs
+    adata = adata[:, ~adata.var_names.isin(list(unmapped_ids))]
+
+    # Convert the remaining IDs to symbols and update 'var' DataFrame index
+    adata.var.index = [id_symbol_dict[id] for id in adata.var_names]
+
+    # Ensure index has no name to avoid '_index' conflict
+    adata.var.index.name = None
+    
+    return adata
+
+
+def old_convert_ensembl_to_symbol(adata, batch_size=1000):
+    mg = mygene.MyGeneInfo()
+
+    ensembl_ids = adata.var_names.tolist()
+    total_ids = len(ensembl_ids)
+    chunks = [ensembl_ids[i:i + batch_size] for i in range(0, total_ids, batch_size)]
+
+    id_symbol_dict = {}
+
+    # Querying in chunks
+    for chunk in chunks:
+        result = mg.querymany(chunk, scopes='ensembl.gene', fields='symbol', species='mouse')
+        chunk_dict = {item['query']: item['symbol'] for item in result if 'symbol' in item}
+        id_symbol_dict.update(chunk_dict)
+
+    # Find IDs without a symbol
+    unmapped_ids = set(ensembl_ids) - set(id_symbol_dict.keys())
+    print(f"Found {len(unmapped_ids)} Ensembl IDs without a gene symbol")
+
+    # Remove unmapped IDs
+    adata = adata[:, ~adata.var_names.isin(list(unmapped_ids))]
+
+    # Convert the remaining IDs to symbols
+    adata.var_names = [id_symbol_dict[id] for id in adata.var_names]
+    
+    return adata
+
+
 
 def read_gmt(file_path: str) -> dict:
     """
@@ -33,8 +98,8 @@ def pull_out_genes(
     cell_type: str,
     category: str, 
     num_genes: int = 0,
-    orderby = "logfoldchanges", 
-    threshold = 0.01) -> list:
+    order_by = "logfoldchanges", 
+    threshold = 2) -> list:
 
     ans = []
     #### xdat = diff_genes_dict[cell_type]
@@ -51,9 +116,9 @@ def pull_out_genes(
             num_genes = xdat.shape[0]
 
         if category_index == 0:
-            xdat.sort_values(by=[orderby], inplace=True, ascending=False)
+            xdat.sort_values(by=[order_by], inplace=True, ascending=False)
         else:
-            xdat.sort_values(by=[orderby], inplace=True, ascending=True)
+            xdat.sort_values(by=[order_by], inplace=True, ascending=True)
 
         ans = list(xdat.iloc[0:num_genes]["names"])
 
