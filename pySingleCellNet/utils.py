@@ -4,10 +4,8 @@ import pandas as pd
 from anndata import AnnData
 import scanpy as sc
 import mygene
-
-# from my friend ChatGPT:
-import mygene
-import numpy as np
+import anndata as ad
+import pySingleCellNet as pySCN
 
 def convert_ensembl_to_symbol(adata, batch_size=1000):
     mg = mygene.MyGeneInfo()
@@ -378,29 +376,103 @@ def reduce_cells(
 
     return adata2
 
+def create_mean_cells(adata, obs_key, obs_value, n_mean_cells, n_cells):
+    """
+    Average n_cells randomly sampled cells from obs_key == obs_value obs, n_mean_cells times
+
+    Parameters:
+    adata: anndata.AnnData
+        The annotated data matrix of shape n_obs x n_vars. Rows correspond to cells and columns to genes.
+    cluster_key: str
+        The key in the obs field that identifies the clusters.
+    n_mean_cells: int
+        The number of meta-cells to create.
+    n_cells: int
+        The number of cells to randomly select from each cluster.
+
+    Returns:
+    anndata.AnnData
+        Annotated data matrix with meta-cells.
+    """
+    if obs_key not in adata.obs:
+        raise ValueError(f"Key '{obs_key}' not found in adata.obs")
+
+    # Create a new anndata object to store the mean-cells
+    mean_cells = None
+    
+    # Get cells in this cluster
+    cluster_cells = adata[adata.obs[obs_key] == obs_value].copy()
+    seeds = np.random.choice(n_mean_cells, n_mean_cells, replace=False)
+    for i in range(n_mean_cells):
+        # Randomly select cells
+        selected_cells = sc.pp.subsample(cluster_cells, n_obs = n_cells, random_state = seeds[i], copy=True)
+
+        # Average their gene expression
+        avg_expression = selected_cells.X.mean(axis=0)
+
+        # Create a new cell in the mean_cells anndata object
+        new_cell = sc.AnnData(avg_expression.reshape(1, -1),
+            var=adata.var, 
+            obs=pd.DataFrame(index=[f'{obs_value}_mean_{i}']))
+
+        # Append new cell to the meta_cells anndata object
+        if mean_cells is None:
+            mean_cells = new_cell
+        else:
+            mean_cells = mean_cells.concatenate(new_cell)
+
+    return mean_cells
+
+
+def add_ambient_rna(
+    adata,
+    obs_key: str,
+    obs_val: str,
+    n_cells_to_sample: int = 10,
+    weight_of_ambient: float = 0.05
+) -> AnnData:
+
+    # What cells will be updated?
+    non_cluster_cells = adata[adata.obs[obs_key] != obs_val, :].copy()
+    n_mean_cells = non_cluster_cells.n_obs
+
+    # Generate the sample means
+    sample_means_adata = create_mean_cells(adata, obs_key, obs_val, n_mean_cells, n_cells_to_sample)
+    
+    # If there are more non-cluster cells than samples, raise an error
+    # if non_cluster_cells.shape[0] > nSamples:
+    #    raise ValueError("The number of samples is less than the number of non-cluster cells.")
+    
+    # Update the non-cluster cells' expression states to be the weighted mean of their current states and the sample means
+    non_cluster_cells.X = (1 - weight_of_ambient) * non_cluster_cells.X + weight_of_ambient * sample_means_adata.X
+    
+    # Update the original adata object with the new expression states
+    adata[adata.obs[obs_key] != obs_val, :] = non_cluster_cells
+    
+    return adata
+
+
+
 def create_hybrid_cells(
     adata: AnnData,
-    clusters: list,
+    celltype_counts: dict,
     groupby: str,
-    n_hybrid_cells: int,
-    weights: list
+    n_hybrid_cells: int
 ) -> AnnData:
     """
-    Generate hybrid cells by calculating the weighted average of transcript counts for randomly selected cells
-    from the specified clusters.
+    Generate hybrid cells by taking the mean of transcript counts for randomly selected cells
+    from the specified groups in proportions as indicated by celltypes
 
     Parameters
     ----------
     adata : AnnData
         Annotated data matrix with observations (cells) and variables (genes).
-    clusters : list
-        A list of integers representing the clusters to use for hybrid cell creation.
+    celltype_counts : dict
+        keys indicate the subset of cells and the values are the number of cells to sample from each cell type.
     groupby : str
         The name of the column in `adata.obs` to group cells by before selecting cells at random.
     n_hybrid_cells : int
         The number of hybrid cells to generate.
-    weights : list
-        A list of floats representing the weights to use for the weighted average.
 
     Returns
     -------
@@ -410,15 +482,15 @@ def create_hybrid_cells(
     hybrid_list = []
     for i in range(n_hybrid_cells):
         # Randomly select cells from the specified clusters
-        cells = adata.obs_names[adata.obs[groupby].isin(clusters)]
-        cells = np.random.choice(cells, size=10, replace=False)
+        r_cells = pySCN.sample_cells(adata, celltype_counts, groupby)
 
-        # Calculate the weighted average transcript counts for the selected cells
-        weighted_counts = np.average(adata[cells].X, axis=0, weights=weights)
+        # Calculate the average transcript counts for the selected cells
+        ### x_counts = np.average(r_cells.X, axis=0)
+        x_counts = np.mean(r_cells.X, axis=0)
 
         # Create an AnnData object for the hybrid cell
         hybrid = AnnData(
-            weighted_counts.reshape(1, -1),
+            x_counts.reshape(1, -1),
             obs={'hybrid': [f'Hybrid Cell {i+1}']},
             var=adata.var
         )
@@ -431,6 +503,47 @@ def create_hybrid_cells(
 
     return hybrid
 
+def sample_cells(
+    adata: AnnData,
+    celltype_counts: dict,
+    groupby: str
+)-> AnnData:
+    """
+    Sample cells as specified by celltype_counts and groub_by
+
+    Parameters
+    ----------
+    adata : AnnData
+        Annotated data matrix with observations (cells) and variables (genes).
+    celltype_counts: dict
+        keys indicate the subset of cells and the values are the number of cells to sample from each cell type.
+    groupby : str
+        The name of the column in `adata.obs` to group cells by before selecting cells at random.
+
+    Returns
+    -------
+    AnnData
+        Annotated data matrix containing only the selected cells.
+    """
+
+    sampled_cells = []
+
+    for celltype, count in celltype_counts.items():
+        # subset the AnnData object by .obs[groupby], most often will be something like cluster, leiden, SCN_class, celltype
+        subset = adata[adata.obs[groupby] == celltype]
+        
+        # sample cells from the subset
+        # sampled_subset = subset.sample(n=count, random_state=1)
+        cell_ids = np.random.choice(subset.obs.index, count, replace = False)
+        adTmp = subset[np.isin(subset.obs.index, cell_ids, assume_unique = True),:].copy()
+        
+        # append the sampled cells to the list
+        sampled_cells.append(adTmp)
+
+    # concatenate the sampled cells into a single AnnData object
+    sampled_adata = sampled_cells[0].concatenate(sampled_cells[1:])
+
+    return sampled_adata
 
 
 def ctMerge(sampTab, annCol, ctVect, newName):

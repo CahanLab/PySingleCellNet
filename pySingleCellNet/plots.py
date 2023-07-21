@@ -8,6 +8,7 @@ import warnings
 import umap
 import anndata as ad
 from palettable.cartocolors.qualitative import Vivid_4
+from palettable.cartocolors.qualitative import Vivid_10
 from palettable.scientific.diverging import Roma_20
 from palettable.scientific.sequential import LaJolla_20
 from palettable.scientific.sequential import Batlow_20
@@ -223,6 +224,7 @@ def heatmap_gsea(
     if clean_signatures:
         gsea_matrix = gsea_matrix.loc[gsea_matrix.sum(1) != 0,:]
 
+    # should add a check on matrix dims, and print message a dim is 0
     ax = sns.clustermap(data=gsea_matrix, cmap=Roma_20.mpl_colormap, center=0,
         yticklabels=1, xticklabels=1, linewidth=.05, linecolor='white',
         method='average', metric='correlation', dendrogram_ratio=dendro_ratio,
@@ -237,8 +239,6 @@ def heatmap_gsea(
     # Let the horizontal axes labeling appear on top.
     # ax.tick_params(top=True, bottom=False,
     #               labeltop=True, labelbottom=False)
-
-    
 
     ax.ax_cbar.set_axis_off()
     ax.figure.tight_layout(h_pad=.05, w_pad=0.02, rect=[0, 0, 1, 1])
