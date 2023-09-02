@@ -7,7 +7,7 @@ import mygene
 import anndata as ad
 import pySingleCellNet as pySCN
 
-def convert_ensembl_to_symbol(adata, batch_size=1000):
+def convert_ensembl_to_symbol(adata, species = 'mouse', batch_size=1000):
     mg = mygene.MyGeneInfo()
 
     ensembl_ids = adata.var_names.tolist()
@@ -18,7 +18,7 @@ def convert_ensembl_to_symbol(adata, batch_size=1000):
 
     # Querying in chunks
     for chunk in chunks:
-        result = mg.querymany(chunk, scopes='ensembl.gene', fields='symbol', species='mouse')
+        result = mg.querymany(chunk, scopes='ensembl.gene', fields='symbol', species=species)
         chunk_dict = {item['query']: item['symbol'] for item in result if 'symbol' in item}
         id_symbol_dict.update(chunk_dict)
 
