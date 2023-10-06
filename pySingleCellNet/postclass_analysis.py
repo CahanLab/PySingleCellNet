@@ -11,6 +11,17 @@ import gseapy as gp
 import os
 import anndata
 import pySingleCellNet as pySCN
+import pacmap
+
+# run pacmap dimendsion reduction an adata.X
+# default parameters
+def embed_pacmap(adata):
+    embedding = pacmap.PaCMAP(n_components=2, n_neighbors=None, MN_ratio=0.5, FP_ratio=2.0)
+    xmat = adata.X
+    xmat = xmat.toarray()
+    X_transformed = embedding.fit_transform(xmat)
+    adata.obsm['X_pacmap'] = X_transformed.copy()
+
 
 def merge_for_diffExp(
     ad1: AnnData,

@@ -223,7 +223,7 @@ def mito_rib(adQ: AnnData, species: str = "MM", clean: bool = True) -> AnnData:
         remove = np.add(mito_genes, ribo_genes)
         keep = np.invert(remove)
         adata = adata[:,keep].copy()
-        sc.pp.calculate_qc_metrics(adata,percent_top=None,log1p=False,inplace=True)
+        # sc.pp.calculate_qc_metrics(adata,percent_top=None,log1p=False,inplace=True)
     
     return adata
 
