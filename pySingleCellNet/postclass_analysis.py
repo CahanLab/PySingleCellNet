@@ -15,9 +15,11 @@ import pacmap
 
 # run pacmap dimendsion reduction an adata.X
 # default parameters
-def embed_pacmap(adata):
+def embed_pacmap(adata, use_hvg = True):
     embedding = pacmap.PaCMAP(n_components=2, n_neighbors=None, MN_ratio=0.5, FP_ratio=2.0)
-    xmat = adata.X
+    #adNorm = pySCN.norm_hvg_scale_pca(adNorm)
+    adHVG = adata[:,adata.var['highly_variable']].copy()
+    xmat = adHVG.X
     xmat = xmat.toarray()
     X_transformed = embedding.fit_transform(xmat)
     adata.obsm['X_pacmap'] = X_transformed.copy()
