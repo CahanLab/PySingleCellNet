@@ -11,13 +11,16 @@ setup(name='pySingleCellNet',
       install_requires=[
           'pandas',
           'numpy',
-          'sklearn',
+          'scikit-learn',
           'scanpy',
-          'sklearn',
           'statsmodels',
           'scipy',
           'matplotlib',
           'seaborn',
-          'umap-learn'
+          'umap-learn',
+          'mygene',
+          'palettable',
+          'gseapy',
+          'pacmap'
       ],
       zip_safe=False)

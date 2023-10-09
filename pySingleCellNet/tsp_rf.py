@@ -1,8 +1,10 @@
 import pandas as pd
 import numpy as np
+import scanpy as sc
 from sklearn import linear_model
 from itertools import combinations
 from .stats import * 
+import random as rand 
 
 ### from stats import * 
 
@@ -134,6 +136,7 @@ def query_transform(expMat, genePairs):
     ans.columns = genePairs
     return(ans)
 
+# I think this is not used
 def pair_transform(expMat):
     pTab=makePairTab(expMat)
     npairs = len(pTab.index)
@@ -162,7 +165,7 @@ def gnrBP(expDat,cellLabels,topX=50):
         ans[levels[i]]=tmpAns
     return ans
 
-def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, quickPairs = True):
+def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, quickPairs = True, propOther: float = 0.5):
     if not quickPairs:
         genes=expDat.columns.values
         grps=np.unique(cell_labels)
@@ -196,6 +199,7 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
 
     else:
         myPatternG= sc_sampR_to_pattern(cell_labels)
+        maxOther = int(np.ceil(propOther * topX))
         res=[]
         grps=np.unique(cell_labels)
         for g in grps:
@@ -206,21 +210,40 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
             tmpPdat=ptSmall(expDat, pairTab)
             tmpAns=findBestPairs(sc_testPattern(myPatternG[g],tmpPdat), topX)
             res.append(tmpAns)
-        return np.unique(np.array(res).flatten())
+            # to add here also select from cgenes_list[-g]
+            notg = [item for item in grps if item != g]
+            for ng in notg:
+                ng_genes = cgenes_list[ng]
+                g1 = list(set(genes).difference(set(ng_genes)))
+                g2 = list(set(ng_genes).difference(set(genes)))
+                lastIndex = min([len(g1), len(g2), maxOther])
+                if lastIndex > 0:
+                    g1 = rand.sample(g1, lastIndex)
+                    g2 = rand.sample(g2, lastIndex)
+                    labels = ['genes1', 'genes2']
+                    pTab = pd.DataFrame(data = list(zip(g1[0:lastIndex], g2[0:lastIndex])), columns = labels)
+                    pxxx = pTab['genes1'] + '_' + pTab['genes2']
+                    res.append( pxxx.to_numpy(dtype="<U32") )
 
-def findClassyGenes(expDat, sampTab,dLevel, topX=25, dThresh=0, alpha1=0.05,alpha2=.001, mu=2):
-    gsTrain=sc_statTab(expDat, dThresh=dThresh)
-    ggenes=sc_filterGenes(gsTrain, alpha1=alpha1, alpha2=alpha2, mu=mu)
-    grps= sampTab[dLevel]
-    xdiff=gnrAll(expDat.loc[:,ggenes], grps)
-    groups=np.unique(grps)
-    res=[]
-    cgenes={}
+                
+        return np.unique( np.concatenate(res) )
+
+
+def findClassyGenes(adDat, dLevel, topX=25):
+    adTemp = adDat.copy()
+    grps = adDat.obs[dLevel]
+    groups = np.unique(grps)
+
+    sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method='wilcoxon')
+    tempTab = pd.DataFrame(adTemp.uns['rank_genes_groups']['names']).head(topX)
+
+    res = []
+    cgenes = {}
+
     for g in groups:
-        temp=getClassGenes(xdiff[g], topX)
-        cgenes[g]=temp
+        temp = tempTab[g] 
         res.append(temp)
-    cgenes2=np.unique(np.array(res).flatten())
-    return [cgenes2, grps, cgenes]
+        cgenes[g] = temp.to_numpy()
+    cgenes2 = np.unique(np.array(res).flatten())
 
-    
+    return [cgenes2, grps, cgenes]    
