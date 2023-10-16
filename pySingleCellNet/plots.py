@@ -188,21 +188,36 @@ def barplot_classifier_f1(adata: AnnData, ground_truth: str = "celltype", class_
     plt.show()
 
 
-def heatmap_scn_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1):    
-    adTemp = AnnData(adata.obsm['SCN_score'], obs=adata.obs)
+def heatmap_scores(
+    adata: AnnData,
+    groupby: str,
+    vmin: float = 0,
+    vmax: float = 1,
+    obsm_name = 'SCN_score'
+):
+    adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
     adTemp.obs[groupby] = adata.obs[groupby]
     # guess at appropriate dimensions
     fsize = [5, 6]
     plt.rcParams['figure.subplot.bottom'] = 0.25
     sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, cmap=Batlow_20.mpl_colormap, dendrogram=False, swap_axes=True, vmin = vmin, vmax = vmax, figsize=fsize)
 
-def dotplot_scn_scores(adata: AnnData, groupby: str, expression_cutoff = 0.1):    
-    adTemp = AnnData(adata.obsm['SCN_score'], obs=adata.obs)
+def dotplot_scn_scores(
+    adata: AnnData,
+    groupby: str,
+    expression_cutoff = 0.1,
+    obsm_name = 'SCN_score'
+):    
+    adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
     adTemp.obs[groupby] = adata.obs[groupby]
     sc.pl.dotplot(adTemp, adTemp.var_names.values, groupby=groupby, expression_cutoff=expression_cutoff, cmap=Batlow_20.mpl_colormap, colorbar_title="SCN score")
 
-def umap_scn_scores(adata: AnnData, scn_classes: list):    
-    adTemp = AnnData(adata.obsm['SCN_score'], obs=adata.obs)
+def umap_scores(
+    adata: AnnData,
+    scn_classes: list,
+    obsm_name = 'SCN_score'
+):    
+    adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
     adTemp.obsm['X_umap'] = adata.obsm['X_umap'].copy()
     sc.pl.umap(adTemp,color=scn_classes, alpha=.75, s=10, vmin=0, vmax=1)
 

@@ -36,8 +36,14 @@ def randomize(expDat: pd.DataFrame, num: int = 50) -> pd.DataFrame:
     # Convert the array back to a DataFrame and return the first num rows
     return pd.DataFrame(data=temp, columns=expDat.columns).iloc[0:num, :]
 
-def sc_makeClassifier(expTrain: pd.DataFrame, genes: np.ndarray, groups: np.ndarray, nRand: int = 70,
-                      ntrees: int = 2000, stratify: bool = False) -> RandomForestClassifier:
+def sc_makeClassifier(
+    expTrain: pd.DataFrame,
+    genes: np.ndarray,
+    groups: np.ndarray,
+    nRand: int = 70,
+    ntrees: int = 2000,
+    stratify: bool = False
+) -> RandomForestClassifier:
     """
     Train a random forest classifier on gene expression data.
 
