@@ -6,6 +6,8 @@ import scanpy as sc
 import mygene
 import anndata as ad
 import pySingleCellNet as pySCN
+from scipy.sparse import issparse
+
 
 def convert_ensembl_to_symbol(adata, species = 'mouse', batch_size=1000):
     mg = mygene.MyGeneInfo()
@@ -90,6 +92,25 @@ def read_gmt(file_path: str) -> dict:
             
     return gene_sets
 
+def filter_gene_list(genelist, min_genes, max_genes):
+    """
+    Filter the gene lists in the provided dictionary based on their lengths.
+
+    Parameters:
+    - genelist : dict
+        Dictionary with keys as identifiers and values as lists of genes.
+    - min_genes : int
+        Minimum number of genes a list should have.
+    - max_genes : int
+        Maximum number of genes a list should have.
+
+    Returns:
+    - dict
+        Filtered dictionary with lists that have a length between min_genes and max_genes (inclusive of min_genes and max_genes).
+    """
+    filtered_dict = {key: value for key, value in genelist.items() if min_genes <= len(value) <= max_genes}
+    return filtered_dict
+
 
 def pull_out_genes(
     diff_genes_dict: dict, 
@@ -172,8 +193,6 @@ def read_broken_geo_mtx(path: str, prefix: str) -> AnnData:
     adata.var_names = adata.var['gene']
     return adata
 
-
-
 def mito_rib(adQ: AnnData, species: str = "MM", clean: bool = True) -> AnnData:
     """
     Calculate mitochondrial and ribosomal QC metrics and add them to the `.var` attribute of the AnnData object.
@@ -236,7 +255,8 @@ def norm_hvg_scale_pca(
     min_disp: float = 0.25,
     scale_max: float = 10,
     n_comps: int = 100,
-    gene_scale: bool = False
+    gene_scale: bool = False,
+    use_hvg: bool = True
 ) -> AnnData:
     """
     Normalize, detect highly variable genes, optionally scale, and perform PCA on an AnnData object.
@@ -287,7 +307,7 @@ def norm_hvg_scale_pca(
         sc.pp.scale(adata, max_value=scale_max)
 
     # Perform PCA on the data
-    sc.tl.pca(adata, n_comps=n_comps)
+    sc.tl.pca(adata, n_comps=n_comps, use_highly_variable=use_hvg)
 
     return adata
 
@@ -545,6 +565,85 @@ def sample_cells(
 
     return sampled_adata
 
+from scipy.sparse import issparse
+
+def compute_mean_expression_per_cluster(
+    adata,
+    cluster_key
+):
+    """
+    Compute mean gene expression for each gene in each cluster, create a new anndata object, and store it in adata.uns.
+
+    Parameters:
+    - adata : anndata.AnnData
+        The input AnnData object with labeled cell clusters.
+    - cluster_key : str
+        The key in adata.obs where the cluster labels are stored.
+
+    Returns:
+    - anndata.AnnData
+        The modified AnnData object with the mean expression anndata stored in uns['mean_expression'].
+    """
+    if cluster_key not in adata.obs.columns:
+        raise ValueError(f"{cluster_key} not found in adata.obs")
+
+    # Extract unique cluster labels
+    clusters = adata.obs[cluster_key].unique().tolist()
+
+    # Compute mean expression for each cluster
+    mean_expressions = []
+    for cluster in clusters:
+        cluster_cells = adata[adata.obs[cluster_key] == cluster, :]
+        mean_expression = np.mean(cluster_cells.X, axis=0).A1 if issparse(cluster_cells.X) else np.mean(cluster_cells.X, axis=0)
+        mean_expressions.append(mean_expression)
+
+    # Convert to matrix
+    mean_expression_matrix = np.vstack(mean_expressions)
+    
+    # Create a new anndata object
+    mean_expression_adata = sc.AnnData(X=mean_expression_matrix, 
+                                       var=pd.DataFrame(index=adata.var_names), 
+                                       obs=pd.DataFrame(index=clusters))
+    
+    # Store this new anndata object in adata.uns
+    adata.uns['mean_expression'] = mean_expression_adata
+    #return adata
+
+
+def find_elbow(
+    adata
+):
+    """
+    Find the "elbow" index in the variance explained by principal components.
+
+    Parameters:
+    - variance_explained : list or array
+        Variance explained by each principal component, typically in decreasing order.
+
+    Returns:
+    - int
+        The index corresponding to the "elbow" in the variance explained plot.
+    """
+    variance_explained = adata.uns['pca']['variance_ratio']
+    # Coordinates of all points
+    n_points = len(variance_explained)
+    all_coords = np.vstack((range(n_points), variance_explained)).T
+    # Line vector from first to last point
+    line_vec = all_coords[-1] - all_coords[0]
+    line_vec_norm = line_vec / np.sqrt(np.sum(line_vec**2))
+    # Vector being orthogonal to the line
+    vec_from_first = all_coords - all_coords[0]
+    scalar_prod = np.sum(vec_from_first * np.tile(line_vec_norm, (n_points, 1)), axis=1)
+    vec_from_first_parallel = np.outer(scalar_prod, line_vec_norm)
+    vec_to_line = vec_from_first - vec_from_first_parallel
+    # Distance to the line
+    dist_to_line = np.sqrt(np.sum(vec_to_line ** 2, axis=1))
+    # Index of the point with max distance to the line
+    elbow_idx = np.argmax(dist_to_line)
+    return elbow_idx
+
+
+
 
 def ctMerge(sampTab, annCol, ctVect, newName):
     oldRows=np.isin(sampTab[annCol], ctVect)
@@ -651,7 +750,6 @@ def downSampleW(vector,total=1e5, dThresh=0):
     res=dVector*vector
     res[res<dThresh]=0
     return res
-
 
 def weighted_down(expDat, total, dThresh=0):
     rSums=expDat.sum(axis=1)

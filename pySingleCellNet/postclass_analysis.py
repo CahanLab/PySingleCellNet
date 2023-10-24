@@ -107,6 +107,29 @@ def combine_gsea_dfs(
     return gsea_comb, my_series
 
 
+def enrichR_on_gene_modules(
+    adata: anndata,
+    geneset: dict,
+    result_name: str, # this should indicate the data source(s), but omit cell types and categories
+    module_method = 'knn',
+    seed: int = 3,
+    min_size: int = 10,
+    max_size: int = 500,
+    hvg = True
+) -> dict:
+    # trim geneset
+    geneset = filter_gene_list(geneset, min_size, max_size)
+    ans = dict()
+    bg_genes = adata.var_names.to_list()
+    if hvg:
+        bg_genes = adata.var_names[adNorm.var['highly_variable']].to_list()
+    modname = module_method + "_modules"
+    genemodules = adata.uns[modname].copy()
+    for gmod, genelist in genemodules.items():
+        tmp_enr = gp.enrichr(gene_list=genelist, gene_sets=geneset, background=bg_genes, outdir=None)
+        ans[gmod] = tmp_enr
+    return ans
+
 def gsea_on_diff_gene_dict(
     diff_gene_dict: dict,
     gene_set_name: str,
@@ -141,6 +164,43 @@ def gsea_on_diff_gene_dict(
         ans[cell_type] = pre_res
 
     return ans
+
+
+def collect_enrichR_results_from_dict(
+    enr_results: dict,
+    adj_p_threshold = 1e-5
+):
+    # Initialize set of pathways. The order of these in prerank results and their composition will differ
+    # so we need to get the union first
+    pathways = pd.Index([])
+    gene_signatures= list(enr_results.keys())
+    for signature in gene_signatures:
+        tmpRes = enr_results[signature].res2d.copy()
+        gene_set_names = list(tmpRes['Term'])
+        pathways = pathways.union(gene_set_names)
+    # initialize an empty results data.frame
+    enr_df = pd.DataFrame(0, columns = gene_signatures, index=pathways)
+    for signature in gene_signatures:
+        tmpRes = enr_results[signature].res2d.copy() 
+        tmpRes.index = tmpRes['Term']
+        tmpRes.loc[lambda df: df['Adjusted P-value'] > adj_p_threshold, "Odds Ratio"] = 0
+        # nes_df.loc[ct_df.index,cell_type] = ct_df.loc[:,"NES"]
+        enr_df[signature] = tmpRes["Odds Ratio"]
+    enr_df = enr_df.apply(pd.to_numeric, errors='coerce')
+    return enr_df
+
+def what_module_has_gene(
+    adata,
+    target_gene,
+    module_method='knn'
+) -> list:
+    mod_slot = module_method + "_modules"
+    if mod_slot not in adata.uns.keys():
+        raise ValueError(mod_slot + " have not been identified.")
+    genemodules = adata.uns[mod_slot]
+    return [key for key, genes in genemodules.items() if target_gene in genes]
+
+        
 
 def collect_gsea_results_from_dict(
     gsea_dict: dict,

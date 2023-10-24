@@ -4,10 +4,12 @@ import pySingleCellNet as pySCN
 import scanpy as sc
 import numpy as np
 from scipy.sparse import csr_matrix
-from scipy.sparse import is_sparse
+from scipy.sparse import issparse
 from sklearn.decomposition import FastICA
 import scanpy as sc
 import numpy as np
+import pandas as pd
+from .utils import *
 
 def rank_dense_submatrix(submatrix):
     # Operate on a dense submatrix to get the ranks
@@ -159,33 +161,46 @@ def findSigGenes(
         dictionary of cluster name : gene list
 
     """
-def find_gene_modules(
+def find_knn_modules(
     adata,
+    mean_cluster = True,
+    dLevel = 'leiden',
     use_hvg = True,
-    knn = 10,
-    n_pcs = 50,
-    prefix='gmod_'
+    knn = 5,
+    leiden_resolution=0.5,
+    prefix='gmod_',
+    npcs_adjust = 1
 ):
-    adtemp = adata.copy()
+    adOps = adata.copy()
     if use_hvg:
         # add test that hvg is set
         hvg_names = adata.var[adata.var['highly_variable']].index.tolist()
-        adtemp = adtemp[:,hvg_names].copy()
-    adata_T = adtemp.T
+        adOps = adOps[:,hvg_names].copy()
+    if mean_cluster:
+        adtemp = adOps.copy()
+        if dLevel not in adtemp.obs.columns:
+            raise ValueError(dLevel + " not in obs.")
+        compute_mean_expression_per_cluster(adtemp, dLevel)
+        adOps = adtemp.uns['mean_expression'].copy()        
+    adata_T = adOps.T
     sc.tl.pca(adata_T)
-    sc.pp.neighbors(adata_T, n_neighbors=knn, n_pcs=n_pcs)
-    # sc.tl.umap(adata_T)
-    sc.tl.leiden(adata_T)
+    elbow = find_elbow(adata_T)
+    n_pcs = elbow + npcs_adjust 
+    sc.pp.neighbors(adata_T, n_neighbors=knn, n_pcs=n_pcs, metric='correlation')
+    sc.tl.leiden(adata_T, leiden_resolution)
     adf = adata_T.obs.copy()
-    clusters = adf.groupby('leiden').apply(lambda x: x.index.tolist()).to_dict()
+    clusters = adf.groupby('leiden', observed=True).apply(lambda x: x.index.tolist()).to_dict()
     clusters = {prefix + k: v for k, v in clusters.items()}
-    adata.uns['gene_modules'] = clusters
+    adata.uns['knn_modules'] = clusters
+    pySCN.score_gene_modules(adata, method='knn')
 
 
 def score_gene_modules(
-    adata
+    adata,
+    method = 'knn'
 ):
-    gene_dict = adata.uns['gene_modules']
+    uns_name = method + "_modules"
+    gene_dict = adata.uns[uns_name]
     # Number of cells and clusters
     n_cells = adata.shape[0]
     # Initialize an empty matrix for scores
@@ -199,7 +214,8 @@ def score_gene_modules(
         scores_df[score_name] = adata.obs[score_name].values
         del(adata.obs[score_name])
     # Assign the scores DataFrame to adata.obsm
-    adata.obsm['module_scores'] = scores_df
+    obsm_name = method + "_module_scores"
+    adata.obsm[obsm_name] = scores_df
 
 
 def identify_ica_gene_modules(adata, k=10, max_iter=3):
@@ -231,7 +247,7 @@ def identify_ica_gene_modules(adata, k=10, max_iter=3):
     for i, component in enumerate(ica.components_):
         # Get the names of the genes in the current component/module
         gene_names = adata.var_names[adata.var['highly_variable']][component.argsort()[-10:][::-1]]  # Top 10 genes as an example
-        gene_modules[f"module_{i}"] = gene_names.tolist()
+        gene_modules[f"gmod_{i}"] = gene_names.tolist()
     # Store gene modules in adata.uns
     adata.uns['ica_modules'] = gene_modules
     #return adata
