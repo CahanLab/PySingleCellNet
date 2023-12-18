@@ -7,7 +7,51 @@ import mygene
 import anndata as ad
 import pySingleCellNet as pySCN
 from scipy.sparse import issparse
+import re
 
+# convert adata.uns[x] into a dict of data.frames
+def convert_diffExp_to_dict(
+    adata,
+    uns_name: str = 'rank_genes_groups'
+):
+    
+    # sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method=test_name)
+    # tempTab = pd.DataFrame(adata.uns[uns_name]['names']).head(topX)
+    tempTab = sc.get.rank_genes_groups_df(adata, group = None, key=uns_name)
+    tempTab = tempTab.dropna()
+    groups = tempTab['group'].cat.categories.to_list()
+    #groups = np.unique(grps)
+
+    ans = {}
+    for g in groups:
+        ans[g] = tempTab[tempTab['group']==g].copy()
+    return ans
+
+def write_gmt(gene_list, filename, collection_name, prefix=""):
+    """
+    Write a .gmt file from a gene list.
+
+    Parameters:
+    gene_list: dict
+        Dictionary of gene sets (keys are gene set names, values are lists of genes).
+    filename: str
+        The name of the file to write to.
+    collection_name: str
+        The name of the gene set collection.
+    prefix: str, optional
+        A prefix to add to each gene set name.
+    """
+    with open(filename, mode='w') as fo:
+        for akey in gene_list:
+            # replace whitespace with a "_"
+            gl_name = re.sub(r'\s+', '_', akey)
+            if prefix:
+                pfix = prefix + "_" + gl_name
+            else:
+                pfix = gl_name
+            preface = pfix + "\t" + collection_name + "\t"
+            output = preface + "\t".join(gene_list[akey])
+            print(output, file=fo)
 
 def convert_ensembl_to_symbol(adata, species = 'mouse', batch_size=1000):
     mg = mygene.MyGeneInfo()
@@ -111,6 +155,38 @@ def filter_gene_list(genelist, min_genes, max_genes):
     filtered_dict = {key: value for key, value in genelist.items() if min_genes <= len(value) <= max_genes}
     return filtered_dict
 
+def pull_out_genes_v2(
+    diff_genes_dict: dict, 
+    cell_type: str,
+    category: str, 
+    num_genes: int = 0,
+    order_by = "logfoldchanges", 
+    threshold = 2) -> list:
+
+    ans = []
+    #### xdat = diff_genes_dict[cell_type]
+    xdat = diff_genes_dict['geneTab_dict'][cell_type]
+    xdat = xdat[xdat['pvals_adj'] < threshold].copy()
+
+    dictkey = list(diff_genes_dict.keys())[0]
+    category_names = diff_genes_dict[dictkey]
+    category_index = category_names.index(category)
+    
+    # any genes left?
+    if xdat.shape[0] > 0:
+
+        if num_genes == 0:
+            num_genes = xdat.shape[0]
+
+        if category_index == 0:
+            xdat.sort_values(by=[order_by], inplace=True, ascending=False)
+        else:
+            xdat.sort_values(by=[order_by], inplace=True, ascending=True)
+
+        ans = list(xdat.iloc[0:num_genes]["names"])
+
+    return ans
+
 
 def pull_out_genes(
     diff_genes_dict: dict, 
@@ -163,8 +239,9 @@ def limit_anndata_to_common_genes(anndata_list):
         common_genes.intersection_update(set(adata.var_names))
     
     # Limit the anndata objects to the common genes
+    # latest anndata update broke this:
     if common_genes:
-        for adata in anndata_list:
+         for adata in anndata_list:
             adata._inplace_subset_var(list(common_genes))
 
     #return anndata_list

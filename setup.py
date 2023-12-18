@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(name='pySingleCellNet',
       version='0.1',
-      description='Determining cell identity from single cell RNA-Seq data',
+      description='Determine cell identity from single cell RNA-Seq data',
       url='http://github.com/pcahan1/PySingleCellNet/',
       author='Patrick Cahan',
       author_email='patrick.cahan@gmail.com',
@@ -20,7 +20,6 @@ setup(name='pySingleCellNet',
           'umap-learn',
           'mygene',
           'palettable',
-          'gseapy',
-          'pacmap'
+          'gseapy'
       ],
       zip_safe=False)

@@ -209,7 +209,7 @@ def score_gene_modules(
     # For each cluster, calculate the gene scores and store in the DataFrame
     for cluster, genes in gene_dict.items():
         score_name = cluster
-        sc.tl.score_genes(adata, gene_list=genes, score_name=score_name)        
+        sc.tl.score_genes(adata, gene_list=genes, score_name=score_name, use_raw=False)        
         # Store the scores in the DataFrame
         scores_df[score_name] = adata.obs[score_name].values
         del(adata.obs[score_name])

@@ -8,6 +8,7 @@ import warnings
 import umap
 import anndata as ad
 from palettable.cartocolors.qualitative import Vivid_4
+from palettable.cartocolors.qualitative import Vivid_3
 from palettable.cartocolors.qualitative import Vivid_10
 from palettable.scientific.diverging import Roma_20
 from palettable.scientific.sequential import LaJolla_20
@@ -15,10 +16,129 @@ from palettable.scientific.sequential import Batlow_20
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
-import altair as alt
+# import altair as alt
 from .utils import *
 
-alt.data_transformers.disable_max_rows()
+
+def barplot_class_proportions_list(
+    ads, 
+    titles=None,
+    scn_classes_to_display=None,
+    bar_height=0.8,
+    bar_groups_obsname = 'SCN_class',
+    bar_subgroups_obsname = 'SCN_class_type'
+):
+    dfs = [adata.obs for adata in ads]
+    num_dfs = len(dfs)
+    # Determine the titles for each subplot
+    if titles is None:
+        titles = ['SCN Class Proportions'] * num_dfs
+    elif len(titles) != num_dfs:
+        raise ValueError("The length of 'titles' must match the number of annDatas.")
+    # Determine the SCN classes to display
+    all_classes_union = set().union(*(df[bar_groups_obsname].unique() for df in dfs))
+    if scn_classes_to_display is not None:
+        if not all(cls in all_classes_union for cls in scn_classes_to_display):
+            raise ValueError("Some values in 'scn_classes_to_display' do not match available 'SCN_class' values in the provided DataFrames.")
+        all_classes = scn_classes_to_display
+    else:
+        all_classes = all_classes_union
+    # Create a figure with multiple subplots
+    fig, axes = plt.subplots(1, num_dfs, figsize=(6 * num_dfs, 8), sharey=True)
+    for ax, df, title in zip(axes, dfs, titles):
+        # Reindex and filter each DataFrame
+        counts = df.groupby(bar_groups_obsname)[bar_subgroups_obsname].value_counts().unstack().reindex(all_classes).fillna(0)
+        proportions = counts.divide(counts.sum(axis=1), axis=0).fillna(0)
+        total_counts = counts.sum(axis=1)
+        # Plotting
+        proportions.plot(kind='barh', stacked=True, colormap=Vivid_3.mpl_colormap, width=bar_height, ax=ax, legend=False)
+        ax.set_xlabel('Proportion')
+        ax.set_title(title)
+        # Adding adjusted internal total counts within each bar
+        text_size = max(min(12 - len(all_classes) // 2, 10), 5)  # Adjust text size
+        for i, value in enumerate(total_counts):
+            ax.text(0.95, i, int(value), ha='right', va='center', color='white', fontsize=text_size)
+    # Setting the y-label for the first subplot only
+    axes[0].set_ylabel('SCN Class')
+    # Adding the legend after the last subplot
+    axes[-1].legend(title='SCN Class Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    return plt
+
+def barplot_scn_categories(
+    adata: AnnData,
+    bar_height = 0.8
+):
+    df = adata.obs.copy()
+    # Group by 'SCN_class' and get dummies for 'SCN_class_type'
+    counts = df.groupby('SCN_class')['SCN_class_type'].value_counts().unstack().fillna(0)
+    proportions = counts.divide(counts.sum(axis=1), axis=0)
+    total_counts = counts.sum(axis=1)
+    # Determine the number of unique SCN_classes to adjust text size
+    num_classes = len(df['SCN_class'].unique())
+    text_size = max(min(12 - num_classes // 2, 10), 5)  # Adjust text size based on number of classes
+    # Plotting
+    ax = proportions.plot(kind='barh', stacked=True, colormap=Vivid_3.mpl_colormap, width=bar_height)
+    ax.set_xlabel('Proportion')
+    ax.set_ylabel('SCN Class')
+    ax.set_title('Proportions of SCN Class Types with Total Counts')
+    # Adding total counts to the right of each bar
+    for i, value in enumerate(total_counts):
+        ax.text(0.95, i, int(value), ha='right', va='center', color='white',fontsize=text_size)
+    plt.legend(title='SCN Class Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    return plt
+
+
+def dotplot_deg(
+    adata: AnnData,
+    diff_gene_dict: dict,
+    #samples_obsvals: list = [],
+    groupby_obsname: str = "comb_sampname",
+    cellgrp_obsname: str = "comb_cellgrp",    
+    cellgrp_obsvals: list = [],
+    num_genes: int = 10, 
+    order_by = 'scores',
+    new_obsname = 'grp_by_samp',
+    use_raw=False
+):
+
+    # remove celltypes unspecified in diff_gene_dict
+    dd_dict = diff_gene_dict['geneTab_dict']
+    tokeep = list(dd_dict.keys())
+
+    # also remove cell_types not listed in celltype_names
+    # default for celltype_names is all celltypes included in dd_dict
+    if len(cellgrp_obsvals) > 0:
+        cellgrp_obsvals = list(set(cellgrp_obsvals).intersection(set(tokeep)))
+    else:
+        cellgrp_obsvals = tokeep
+
+    adNew = adata.copy()
+    adNew = adNew[adNew.obs[cellgrp_obsname].isin(cellgrp_obsvals)].copy()
+    
+    # remove categories unspecified in diff_gene_dict
+    dictkey = list(diff_gene_dict.keys())[0]
+    sample_names = diff_gene_dict[dictkey]
+    adNew = adNew[adNew.obs[groupby_obsname].isin(sample_names)].copy()
+
+    # add column 'grp_by_samp' to obs that indicates cellgrp by sample
+    adNew.obs[new_obsname] = adNew.obs[cellgrp_obsname].astype(str) + "_X_" + adNew.obs[groupby_obsname].astype(str)
+    
+    # define dict of marker genes based on threshold
+    genes_to_plot = dict()
+    for cellgrp in cellgrp_obsvals:
+        print(f"{cellgrp}")
+        for sname in sample_names:
+            print(f"{sname}")
+            genes_to_plot[cellgrp + "_X_" + sname] = pull_out_genes_v2(diff_gene_dict, cell_type = cellgrp, category = sname, num_genes = num_genes, order_by=order_by) 
+
+    # return adNew, genes_to_plot
+    plt.rcParams['figure.constrained_layout.use'] = True
+    #xplot = sc.pl.DotPlot(adNew, genes_to_plot, 'ct_by_cat', cmap='RdPu', var_group_rotation = 0) #, dendrogram=True,ax=ax2, show=False)
+    xplot = sc.pl.DotPlot(adNew, genes_to_plot, new_obsname, cmap=LaJolla_20.mpl_colormap, var_group_rotation = 0, use_raw=False) #, dendrogram=True,ax=ax2, show=False)
+    xplot.swap_axes(True) # see sc.pl.DotPlot docs for useful info
+    return xplot
 
 
 def dotplot_diff_gene(
@@ -71,92 +191,6 @@ def dotplot_diff_gene(
     xplot.swap_axes(True) # see sc.pl.DotPlot docs for useful info
     return xplot
     
-
-def old_stackedbar_categories(
-    ad_list: list, 
-    adata_names: list, # a sample id or name to disinguish anndatas in plot
-    celltype_groupby: str = "SCN_class", # what to group the cells on
-    category_groupby: str = "SCN_class_type", # what to split celltypes on
-    color_dict: dict = {'Hybrid': 'lightgreen','None': 'peachpuff', 'Singular': 'powderblue'}
-):
-    
-    # make a pd of celltype, category, sample_id
-    obs_all = pd.DataFrame()
-    i = 0
-    for adTemp in ad_list:
-        obsTmp = adTemp.obs[ [celltype_groupby, category_groupby] ].copy()
-        obsTmp["source"] = adata_names[i]
-        obs_all = pd.concat([obs_all, obsTmp])
-        i = i + 1
-
-    xcar = alt.Chart(obs_all).mark_bar().encode(
-        column=alt.Column('source',sort=["HeldOut", "Query 1"]),
-        x=alt.X('count()', stack="normalize",axis=alt.Axis(format='%', title='Percent of cells')),
-        y=celltype_groupby,
-        color=alt.Color(
-            category_groupby,
-            # sort=["Singular", "Hybrid", "None"], 
-            scale=alt.Scale(domain=list(color_dict.keys()),range=list(color_dict.values()))
-        )
-    )
-    return xcar
-
-# Vivid
-# organge
- #e58606
-# blue
-#5d69b1
-# greenish
-#52bca3
-# light green
-#99c945
-
-def stackedbar_categories(
-    ad_list: list, 
-    adata_names: list, # a sample id or name to 52bca3disinguish anndatas in plot
-    celltype_groupby: str = "SCN_class", # what to group the cells on
-    category_groupby: str = "SCN_class_type", # what to split celltypes on
-    color_dict: dict = {'Hybrid': '#52bca3','None': '#5d69b1', 'Singular': '#e58606'},
-    plot_proportions: bool = True # whether to plot proportions or total counts
-):
-    
-    # make a pd of celltype, category, sample_id
-    obs_all = pd.DataFrame()
-    i = 0
-    for adTemp in ad_list:
-        obsTmp = adTemp.obs[ [celltype_groupby, category_groupby] ].copy()
-        obsTmp["source"] = adata_names[i]
-        obs_all = pd.concat([obs_all, obsTmp])
-        i = i + 1
-
-    if plot_proportions:
-        xcar = alt.Chart(obs_all).mark_bar().encode(
-            column=alt.Column('source',sort=["HeldOut", "Query 1"]),
-            x=alt.X('count()', stack="normalize",axis=alt.Axis(format='%', title='Percent of cells')),
-            y=celltype_groupby,
-            color=alt.Color(
-                category_groupby,
-                sort=["Singular", "Hybrid", "None"], 
-                scale=alt.Scale(domain=list(color_dict.keys()),range=list(color_dict.values()))
-                # scale=alt.Scale(scheme=Vivid_4)
-            
-            )
-        )
-    else:
-        xcar = alt.Chart(obs_all).mark_bar().encode(
-            column=alt.Column('source',sort=["HeldOut", "Query 1"]),
-            x=alt.X('count()', stack="zero",axis=alt.Axis(format='%', title='Number of cells')),
-            y=celltype_groupby,
-            color=alt.Color(
-                category_groupby,
-                sort=["Singular", "Hybrid", "None"], 
-                scale=alt.Scale(domain=list(color_dict.keys()),range=list(color_dict.values()))
-                #scale=alt.Scale(scheme=Vivid_4)   
-            )
-        )
-
-    return xcar
-
 
 
 def barplot_classifier_f1(adata: AnnData, ground_truth: str = "celltype", class_prediction: str = "SCN_class"):
@@ -223,7 +257,7 @@ def umap_scores(
 
 
 def heatmap_gsea(
-    gsea_matrix,
+    gmat,
     clean_signatures = False,
     clean_cells = False,
     column_colors = None,
@@ -233,6 +267,7 @@ def heatmap_gsea(
     dendro_ratio = (0.3, 0.1) 
 ):
     
+    gsea_matrix = gmat.copy()
     if clean_cells:
         gsea_matrix = gsea_matrix.loc[:,gsea_matrix.sum(0) != 0]
 
@@ -240,9 +275,9 @@ def heatmap_gsea(
         gsea_matrix = gsea_matrix.loc[gsea_matrix.sum(1) != 0,:]
 
     # should add a check on matrix dims, and print message a dim is 0
-    ax = sns.clustermap(data=gsea_matrix, cmap=Roma_20.mpl_colormap, center=0,
+    ax = sns.clustermap(data=gsea_matrix, cmap=Roma_20.mpl_colormap.reversed(), center=0,
         yticklabels=1, xticklabels=1, linewidth=.05, linecolor='white',
-        method='average', metric='correlation', dendrogram_ratio=dendro_ratio,
+        method='average', metric='euclidean', dendrogram_ratio=dendro_ratio,
         col_cluster = False, col_colors= column_colors, figsize=figsize)
     # put gene set labels on left side, and right justify them <- does not work well    
     # ax.ax_heatmap.yaxis.tick_left()

@@ -229,12 +229,39 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
         return np.unique( np.concatenate(res) )
 
 
-def findClassyGenes(adDat, dLevel, topX=25):
+# this is the same thing as findSigGenes() in rank_class.py
+def findSignatureGenes(
+    adata,
+    dLevel: str = "leiden",
+    topX: int = 25,
+    uns_name: str = 'rank_genes_groups'
+):
+    grps = adata.obs[dLevel]
+    groups = np.unique(grps)
+    # sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method=test_name)
+    # tempTab = pd.DataFrame(adata.uns[uns_name]['names']).head(topX)
+    tempTab = sc.get.rank_genes_groups_df(adata, group = None, key=uns_name)
+    tempTab = tempTab.dropna()
+    cgenes = {}
+    for g in groups:
+        temp = tempTab[tempTab['group']==g]
+        glen = len(temp) 
+        if glen > 0:
+            if glen > topX:
+                cgenes[g] = temp[:topX]['names'].to_numpy()
+            else:
+                cgenes[g] = temp['names'].to_numpy()
+
+    return cgenes
+
+
+
+def findClassyGenes(adDat, dLevel, topX=25, test_name='wilcoxon'):
     adTemp = adDat.copy()
     grps = adDat.obs[dLevel]
     groups = np.unique(grps)
 
-    sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method='wilcoxon')
+    sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method=test_name)
     tempTab = pd.DataFrame(adTemp.uns['rank_genes_groups']['names']).head(topX)
 
     res = []

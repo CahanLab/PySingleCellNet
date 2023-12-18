@@ -11,7 +11,109 @@ import gseapy as gp
 import os
 import anndata
 import pySingleCellNet as pySCN
-import pacmap
+#import pacmap
+import copy
+
+
+def gsea_on_deg(
+    deg_res: dict,
+    genesets_name: str,
+    genesets: dict,
+    permutation_num: int = 100,
+    threads: int = 4,
+    seed: int = 3,
+    min_size: int = 10,
+    max_size: int = 500
+) -> dict:
+    ans = dict()
+    # categories = diff_gene_dict['category_names']
+    # categories = list(deg_res.keys())[0]
+    ### diff_gene_tables = deg_res['geneTab_dict']
+    diff_gene_tables = deg_res
+    cellgrp_vals = list(diff_gene_tables.keys()) # this should be an optional parameter
+    for cellgrp in cellgrp_vals:
+        # run_name = gene_set_name + "::" + cell_type + "_" + categories[0] + "_vs_" + categories[1]
+        #  out_dir = path_to_results + "/" + genesets_name + "/" + cellgrp
+        # os.makedirs(out_dir, exist_ok=True)
+        # prep data
+        atab = diff_gene_tables[cellgrp]
+        atab = atab[['names', 'scores']]
+        atab.columns = ['0', '1']
+        pre_res = gp.prerank(rnk=atab, gene_sets=genesets, permutation_num = permutation_num, ascending = False, threads=threads,  no_plot = True, seed=seed, min_size = min_size, max_size=max_size)
+        ans[cellgrp] = pre_res
+    return ans
+
+def deg(
+    adata: AnnData,
+    sample_obsvals: list = [],  # impacts the sign of the test statistic
+    limitto_obsvals: list = [], # what cell_grps to test, if empty, test them all
+    cellgrp_obsname: str = 'comb_cellgrp',  # .obs column name holding the cell sub-groups that will be iterated over
+    groupby_obsname: str = 'comb_sampname',
+    ncells_per_sample: int = 30, # don't test if fewer than ncells_per_sample
+    test_name: str = 't-test'
+    
+) -> dict:
+    ans = dict()
+    # these are the keys for the rank_genes_groups object
+    subset_keys = ['names', 'scores', 'pvals', 'pvals_adj', 'logfoldchanges']
+    if len(sample_obsvals) == 0:
+        sample_obsvals = adata.obs[groupby_obsname].unique().tolist()
+    ans['sample_names'] = sample_obsvals # this is used later to properly order diffExp DF
+    # check for mis-matches between provided cell_group names and those available in adata
+    cellgroup_names_in_anndata = adata.obs[cellgrp_obsname].unique()
+    if len(limitto_obsvals) > 0:
+        unique_to_input = [x for x in limitto_obsvals if x not in cellgroup_names_in_anndata]
+        if len(unique_to_input) > 0:
+            print(f"The argument cellgrp_obsname has values that are not present in adata: {unique_to_input}")
+        else:
+            cellgroup_names = limitto_obsvals
+    else:
+        cellgroup_names = cellgroup_names_in_anndata
+    tmp_dict = dict()
+
+    mask = adata.obs[groupby_obsname].isin(sample_obsvals)
+    adata = adata[mask].copy()
+
+    for cell_group in cellgroup_names:
+        print(f"cell group: {cell_group}")
+        adTmp = adata[adata.obs[cellgrp_obsname] == cell_group].copy()
+        vcounts = adTmp.obs[groupby_obsname].value_counts()
+        if (len(vcounts) == 2) and ( (vcounts >= ncells_per_sample).all() ):
+            sc.tl.rank_genes_groups(adTmp, use_raw=False, groupby=groupby_obsname, groups=[sample_obsvals[0]], reference=sample_obsvals[1], method=test_name)
+            tmp_dict[cell_group] = convert_rankGeneGroup_to_df(adTmp.uns['rank_genes_groups'].copy(), subset_keys)
+    ans['geneTab_dict'] = tmp_dict
+    return ans
+
+
+def combine_adatas_for_deg(
+    adatas: list,
+    sample_obsvals: list,
+    cellgrp_obsnames: list,
+    new_cellgrp_obsname = 'comb_cellgrp',
+    groupby_obsname = 'comb_sampname'
+):
+    # Check input
+    if len(adatas) != 2 or len(sample_obsvals) != 2 or len(cellgrp_obsnames) != 2:
+        raise ValueError("Input lists should have a length of 2.")
+    # Create deep copies of the input AnnData objects
+    adata1 = adatas[0].copy()
+    adata2 = adatas[1].copy()
+    # Assign sample names to the respective AnnData objects
+    adata1.obs[groupby_obsname] = sample_obsvals[0]
+    adata2.obs[groupby_obsname] = sample_obsvals[1]
+    adata1.obs[new_cellgrp_obsname] = adata1.obs[cellgrp_obsnames[0]].copy()
+    adata2.obs[new_cellgrp_obsname] = adata2.obs[cellgrp_obsnames[1]].copy()
+
+    pySCN.limit_anndata_to_common_genes([adata1, adata2])
+    
+    # Combine the AnnData objects
+    # combined_adata = adata1.concatenate(adata2)
+    combined_adata = anndata.concat([adata1, adata2])
+    combined_adata.obs_names_make_unique()
+    combined_adata.raw = combined_adata
+    return combined_adata
+
+
 
 # run pacmap dimendsion reduction an adata.X
 # default parameters
@@ -122,13 +224,48 @@ def enrichR_on_gene_modules(
     ans = dict()
     bg_genes = adata.var_names.to_list()
     if hvg:
-        bg_genes = adata.var_names[adNorm.var['highly_variable']].to_list()
+        bg_genes = adata.var_names[adata.var['highly_variable']].to_list()
     modname = module_method + "_modules"
     genemodules = adata.uns[modname].copy()
     for gmod, genelist in genemodules.items():
         tmp_enr = gp.enrichr(gene_list=genelist, gene_sets=geneset, background=bg_genes, outdir=None)
         ans[gmod] = tmp_enr
     return ans
+
+
+def gsea_on_rank_genes_groups(
+    adata,
+    gene_sets,
+    result_name: str, # this should indicate the data source(s), but omit cell types and categories
+    permutation_num: int = 100,
+    threads: int = 4,
+    seed: int = 3,
+    min_size: int = 10,
+    max_size: int = 500
+) -> dict:
+
+    ans = dict()
+
+    categories = diff_gene_dict['category_names']
+    diff_gene_tables = diff_gene_dict['geneTab_dict']
+    cell_types = list(diff_gene_tables.keys()) # this should be an optional parameter
+
+    for cell_type in cell_types:
+        # run_name = gene_set_name + "::" + cell_type + "_" + categories[0] + "_vs_" + categories[1]
+        out_dir = path_to_results + "/" + result_name + "/" + gene_set_name + "/" + cell_type + "_" + categories[0] + "_vs_" + categories[1]
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # prep data
+        atab = diff_gene_tables[cell_type]
+        atab = atab[['names', 'scores']]
+        atab.columns = ['0', '1']
+
+        pre_res = gp.prerank(rnk=atab, gene_sets=gene_set_path, outdir=out_dir, 
+            permutation_num = permutation_num, ascending = False, threads=threads,  no_plot = True, seed=seed, min_size = min_size, max_size=max_size)
+        ans[cell_type] = pre_res
+
+    return ans
+
 
 def gsea_on_diff_gene_dict(
     diff_gene_dict: dict,
@@ -203,13 +340,14 @@ def what_module_has_gene(
         
 
 def collect_gsea_results_from_dict(
-    gsea_dict: dict,
+    gsea_dict2: dict,
     fdr_thr = 0.25
 ):
     
     # Initialize set of pathways. The order of these in prerank results and their composition will differ
     # so we need to get the union first
 
+    gsea_dict = copy.deepcopy(gsea_dict2)
     pathways = pd.Index([])
     cell_types = list(gsea_dict.keys())
 
@@ -254,22 +392,20 @@ def make_diff_gene_dict(
             print(f"The argument celltype_names has values that are not present in adata: {unique_to_input}")
             # return dict()
         else:
-
             ans['category_names'] = category_names # this is used later to properly order diffExp DF
             tmp_dict = dict()
 
-            if len(celltype_names)  == 0:
-                celltype_names = celltype_names_in_anndata
+    if len(celltype_names)  == 0:
+        celltype_names = celltype_names_in_anndata
 
-            for ct in celltype_names:
-                adTmp = adata[adata.obs[celltype_groupby] == ct].copy()
-                # print(ct)
-                sc.tl.rank_genes_groups(adTmp, use_raw=False, groupby=category_groupby, groups=[category_names[0]], reference=category_names[1], method="wilcoxon")
-                #### ans[ct] = convert_rankGeneGroup_to_df(adTmp.uns['rank_genes_groups'].copy(), subset_keys)
-                tmp_dict[ct] = convert_rankGeneGroup_to_df(adTmp.uns['rank_genes_groups'].copy(), subset_keys)
+    for ct in celltype_names:
+        adTmp = adata[adata.obs[celltype_groupby] == ct].copy()
+        # print(ct)
+        sc.tl.rank_genes_groups(adTmp, use_raw=False, groupby=category_groupby, groups=[category_names[0]], reference=category_names[1], method="wilcoxon")
+        #### ans[ct] = convert_rankGeneGroup_to_df(adTmp.uns['rank_genes_groups'].copy(), subset_keys)
+        tmp_dict[ct] = convert_rankGeneGroup_to_df(adTmp.uns['rank_genes_groups'].copy(), subset_keys)
     
-            ans['geneTab_dict'] = tmp_dict
-
+    ans['geneTab_dict'] = tmp_dict
     return ans
     
 def class_by_threshold(adata_c: AnnData, thresholds: pd.DataFrame, columns_to_ignore: list = ["rand"], inplace = True ):
