@@ -1,5 +1,15 @@
 # Training data
 
+### Mouse embryo data
+
+1. [Mouse gastrulation](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adMouseAtlas_demo_121823.h5ad)
+	- This is a subset of the mouse gastrulation atlas described in [Pijuan-Sala et al Nature 2019](https://www.nature.com/articles/s41586-019-0933-9). We have reduced the size of this dataset and we have re-annotated the cell lineages based on recent spatial transcriptomics studies of mouse gastrulation (see [Lohoff et al 2021](https://www.nature.com/articles/s41587-021-01006-2) and [Kumar et al 2023](https://www.nature.com/articles/s41588-023-01435-6)).
+	- There are 18,023 cells
+	- 27,636 genes
+	- 25 cell types or lineages
+	- E7.0 to E8.5
+
+
 ### Mouse training data from [Tabula senis] 10X.
 
 1. [Bladder](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/adBladder_TabSen_101320.h5ad)
