@@ -10,7 +10,7 @@ from .tsp_rf import *
 import gseapy as gp
 import os
 import anndata
-import pySingleCellNet as pySCN
+# import pySingleCellNet as pySCN
 #import pacmap
 import copy
 
@@ -104,7 +104,8 @@ def combine_adatas_for_deg(
     adata1.obs[new_cellgrp_obsname] = adata1.obs[cellgrp_obsnames[0]].copy()
     adata2.obs[new_cellgrp_obsname] = adata2.obs[cellgrp_obsnames[1]].copy()
 
-    pySCN.limit_anndata_to_common_genes([adata1, adata2])
+    # pySCN.limit_anndata_to_common_genes([adata1, adata2])
+    limit_anndata_to_common_genes([adata1, adata2])
     
     # Combine the AnnData objects
     # combined_adata = adata1.concatenate(adata2)
@@ -171,7 +172,8 @@ def merge_for_diffExp(
     adTmp1 = adTmp1[adTmp1.obs[cell_group_name].isin(cell_groups)]
     adTmp2 = adTmp2[adTmp2.obs[cell_group_name].isin(cell_groups)]
 
-    pySCN.limit_anndata_to_common_genes([adTmp1, adTmp2])
+    # pySCN.limit_anndata_to_common_genes([adTmp1, adTmp2])
+    limit_anndata_to_common_genes([adTmp1, adTmp2])
     adBoth = anndata.concat([adTmp1, adTmp2])
     return adBoth
 
@@ -207,6 +209,26 @@ def combine_gsea_dfs(
 
     my_series = pd.Series(column_annotations, index=list(gsea_comb.columns))
     return gsea_comb, my_series
+
+
+# just run enrichR on result of convert_rank_genes_groups_to_dict() <- rank_genes_groups()
+def enrichR_on_RGG(
+    query_gene_lists: dict, # usually made with convert_rank_genes_groups_to_dict()
+    ref_gene_lists: dict, # from source such as MSigDB
+    background_genes: list, # list of possible genes
+    seed: int = 3,
+    min_size: int = 5
+#    max_size: int = 1000
+) -> dict:
+
+    # trim ref_gene_lists
+    ref_gene_lists = filter_gene_list(ref_gene_lists, min_size)
+    query_gene_lists = filter_gene_list(query_gene_lists, min_size)
+    ans = dict()
+    qlist_names = list(query_gene_lists.keys())
+    for qlist_name in qlist_names:
+        ans[qlist_name] = gp.enrichr(gene_list=query_gene_lists[qlist_name], gene_sets=ref_gene_lists, background=background_genes, outdir=None)
+    return ans
 
 
 def enrichR_on_gene_modules(
@@ -324,6 +346,7 @@ def collect_enrichR_results_from_dict(
         # nes_df.loc[ct_df.index,cell_type] = ct_df.loc[:,"NES"]
         enr_df[signature] = tmpRes["Odds Ratio"]
     enr_df = enr_df.apply(pd.to_numeric, errors='coerce')
+    enr_df.fillna(0, inplace=True)
     return enr_df
 
 def what_module_has_gene(
@@ -369,6 +392,34 @@ def collect_gsea_results_from_dict(
 
     nes_df = nes_df.apply(pd.to_numeric, errors='coerce')
     return nes_df
+
+# converts either rank_genes_groups or rank_genes_groups_filtered
+# to a dict, each entry is a list of gene symbols. optional additional gene filter on pvals_adj
+# result can be used as input to enrichR
+def convert_rank_genes_groups_to_dict(
+    adata: AnnData,
+    groupby: str = 'leiden',
+    key: str = 'rank_genes_groups',
+    pvals_adj: int = 1,
+    # min_fold_change: int = 0.7,
+    # min_in_group_fraction: int = 0.3,
+    # max_out_group_fraction: int = 0.25
+):
+    dedf_x = sc.get.rank_genes_groups_df(adata, group=None, key=key)
+    # if this key == 'rank_genes_groups_filtered', then the names can have NaN so remoe them
+    dedf_x.dropna(subset=['names'], inplace=True)
+    if(pvals_adj != 1):
+        dedf_x = dedf_x[dedf_x['pvals_adj']<pvals_adj]
+    # group_names = adata.obs[groupby].unique()
+    groups = dedf_x['group'].cat.categories.to_list()
+    tmp_dict = dict()
+    if len(groups) > 0:
+        for g in groups:
+            tmpDF = dedf_x[dedf_x['group']==g].copy()
+            print(f"{g} .... {tmpDF.shape[0]}")
+            tmp_dict[g] = tmpDF['names'].tolist()
+    return tmp_dict
+
 
 
 def make_diff_gene_dict(

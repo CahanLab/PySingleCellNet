@@ -26,7 +26,8 @@ def barplot_class_proportions_list(
     scn_classes_to_display=None,
     bar_height=0.8,
     bar_groups_obsname = 'SCN_class',
-    bar_subgroups_obsname = 'SCN_class_type'
+    bar_subgroups_obsname = 'SCN_class_type',
+    ncell_min = None,
 ):
     dfs = [adata.obs for adata in ads]
     num_dfs = len(dfs)
@@ -48,22 +49,41 @@ def barplot_class_proportions_list(
     for ax, df, title in zip(axes, dfs, titles):
         # Reindex and filter each DataFrame
         counts = df.groupby(bar_groups_obsname)[bar_subgroups_obsname].value_counts().unstack().reindex(all_classes).fillna(0)
-        proportions = counts.divide(counts.sum(axis=1), axis=0).fillna(0)
         total_counts = counts.sum(axis=1)
+        if ncell_min is not None:
+            total_counts = total_counts.where(total_counts >= ncell_min, 0)
+
+        proportions = counts.divide(total_counts, axis=0).fillna(0).replace([np.inf, -np.inf], 0, inplace=False)
+        total_percent = (total_counts / total_counts.sum() * 100).round(1)  # Converts to percentage and round
+
         # Plotting
         proportions.plot(kind='barh', stacked=True, colormap=Vivid_3.mpl_colormap, width=bar_height, ax=ax, legend=False)
+        # Modify colors from colormap to include alpha transparency
+        # colors = [Vivid_3.mpl_colormap(i) for i in range(Vivid_3.mpl_colormap.N)]
+        # new_colors = [(r,g,b,alpha_values.iloc[i]) for i, (r,g,b,a) in enumerate(colors)]  # Modify alpha for each color
+        # new_colormap = mcolors.LinearSegmentedColormap.from_list("CustomMap", new_colors)
+        
+        # Plotting with the modified colormap
+        # proportions.plot(kind='barh', stacked=True, colormap=new_colormap, width=bar_height, ax=ax, legend=False)        
+        
+        # Adding adjusted internal total counts within each bar
+        text_size = max(min(12 - len(all_classes) // 2, 10), 7)  # Adjust text size
+        for i, (count, percent) in enumerate(zip(total_counts, total_percent)):
+            text = f'{int(count)} ({percent}%)'  # Text to display
+            # text = f'({percent}%)'  # Text to display
+            ax.text(0.95, i, text, ha='right', va='center', color='white', fontsize=text_size)
+
         ax.set_xlabel('Proportion')
         ax.set_title(title)
-        # Adding adjusted internal total counts within each bar
-        text_size = max(min(12 - len(all_classes) // 2, 10), 5)  # Adjust text size
-        for i, value in enumerate(total_counts):
-            ax.text(0.95, i, int(value), ha='right', va='center', color='white', fontsize=text_size)
+
     # Setting the y-label for the first subplot only
     axes[0].set_ylabel('SCN Class')
     # Adding the legend after the last subplot
     axes[-1].legend(title='SCN Class Type', bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
     return plt
+
+
 
 def barplot_scn_categories(
     adata: AnnData,
@@ -256,6 +276,7 @@ def umap_scores(
     sc.pl.umap(adTemp,color=scn_classes, alpha=.75, s=10, vmin=0, vmax=1)
 
 
+
 def heatmap_gsea(
     gmat,
     clean_signatures = False,
@@ -264,7 +285,8 @@ def heatmap_gsea(
     figsize=(8,6),
     label_font_size = 7,
     cbar_pos = [0.07, .3, .02, .4],
-    dendro_ratio = (0.3, 0.1) 
+    dendro_ratio = (0.3, 0.1),
+    cbar_title='NES' 
 ):
     
     gsea_matrix = gmat.copy()
@@ -297,7 +319,7 @@ def heatmap_gsea(
 
     ax.ax_cbar.set_position(cbar_pos)
     ax.ax_cbar.yaxis.tick_left()
-    ax.ax_cbar.set_title('NES', fontsize=label_font_size)
+    ax.ax_cbar.set_title(cbar_title, fontsize=label_font_size)
     ax.ax_cbar.tick_params(labelsize=label_font_size) # set_ylabel(size = label_font_size)
     
     ax.ax_row_dendrogram.set_visible(False)

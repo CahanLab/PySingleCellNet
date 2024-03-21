@@ -5,11 +5,50 @@ from anndata import AnnData
 import scanpy as sc
 import mygene
 import anndata as ad
-import pySingleCellNet as pySCN
 from scipy.sparse import issparse
 import re
 
+
+def sort_obs_table(adata):
+    """
+    Sorts the observation table of an AnnData object by 'celltype' and the numeric part of 'stage'.
+
+    This function takes an AnnData object as input, extracts the 'celltype' and 'stage' columns 
+    from its observation (obs) DataFrame, counts the occurrences of each unique pair, and sorts 
+    these counts first by 'celltype' and then by the numeric value extracted from 'stage'.
+
+    Args:
+        adata (AnnData): An AnnData object containing the single-cell dataset.
+
+    Returns:
+        pandas.DataFrame: A DataFrame with sorted counts of cell types and stages.
+
+    Notes:
+        The 'stage' column is expected to contain string values with a numeric part that can be 
+        extracted and sorted numerically. The function does not modify the original AnnData object.
+    """
+    # Count occurrences of each unique 'celltype' and 'stage' pair
+    counts = adata.obs[['celltype', 'stage']].value_counts()
+    counts_df = counts.reset_index()
+    counts_df.columns = ['celltype', 'stage', 'count']
+
+    # Add a temporary column 'stage_num' for numeric sorting of 'stage'
+    # Then sort by 'celltype' and the numeric part of 'stage'
+    # Finally, drop the temporary 'stage_num' column
+    counts_df = (
+        counts_df
+        .assign(stage_num=lambda df: df['stage'].str.extract(r'(\d+\.\d+|\d+)')[0].astype(float))
+        .sort_values(by=['celltype', 'stage_num'])
+        .drop(columns='stage_num')
+    )
+
+    return counts_df
+
+
+
+
 # convert adata.uns[x] into a dict of data.frames
+#### SEE postclass_analysis.py convert_rank_genes_groups_to_dict()
 def convert_diffExp_to_dict(
     adata,
     uns_name: str = 'rank_genes_groups'
@@ -136,7 +175,7 @@ def read_gmt(file_path: str) -> dict:
             
     return gene_sets
 
-def filter_gene_list(genelist, min_genes, max_genes):
+def filter_gene_list(genelist, min_genes, max_genes=1e6):
     """
     Filter the gene lists in the provided dictionary based on their lengths.
 
@@ -579,7 +618,7 @@ def create_hybrid_cells(
     hybrid_list = []
     for i in range(n_hybrid_cells):
         # Randomly select cells from the specified clusters
-        r_cells = pySCN.sample_cells(adata, celltype_counts, groupby)
+        r_cells = sample_cells(adata, celltype_counts, groupby)
 
         # Calculate the average transcript counts for the selected cells
         ### x_counts = np.average(r_cells.X, axis=0)

@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(name='pySingleCellNet',
-      version='0.1',
+      version='0.1.1',
       description='Determine cell identity from single cell RNA-Seq data',
       url='http://github.com/pcahan1/PySingleCellNet/',
       author='Patrick Cahan',

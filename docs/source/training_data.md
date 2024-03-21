@@ -9,6 +9,8 @@
 	- 25 cell types or lineages
 	- E7.0 to E8.5
 
+2. [Mouse gastrulation v2](https://cnobjects.s3.amazonaws.com/singleCellNet/pySCN/training/mouseGastrulation_n75_032124.h5ad)
+	- This is also subset of the mouse gastrulation atlas described in [Pijuan-Sala et al Nature 2019](https://www.nature.com/articles/s41586-019-0933-9). We have included earlier time points and reduced the number of cells per cell type to 75.
 
 ### Mouse training data from [Tabula senis] 10X.
 

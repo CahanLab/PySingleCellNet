@@ -94,6 +94,7 @@ def extract_top_genes(
         cluster_genes_dict[cluster] = cluster_genes
     return cluster_genes_dict
 
+
 def score_clusters_to_obsm(adx, gene_dict):
     adata = adx.copy()
     # Number of cells and clusters
@@ -128,7 +129,7 @@ def findSigGenes(
     grps = adDat.obs[dLevel]
     groups = np.unique(grps)
     sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method=method)
-    sc.tl.filter_rank_genes_groups(adNorm, min_fold_change=min_fold_change, min_in_group_fraction=min_in_group_fraction, max_out_group_fraction=max_out_group_fraction)
+    sc.tl.filter_rank_genes_groups(adTemp, min_fold_change=min_fold_change, min_in_group_fraction=min_in_group_fraction, max_out_group_fraction=max_out_group_fraction)
     tempTab = pd.DataFrame(adTemp.uns['rank_genes_groups_filtered']['names']).head(topX)
     cgenes = {}
     for g in groups:

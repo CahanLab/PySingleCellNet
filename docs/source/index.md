@@ -15,6 +15,7 @@ Getting started <install.md>
 Prepare training data <notebooks/how-to_prepare_reference_data.ipynb>
 Train and classify <notebooks/train_classifier.ipynb>
 Explore results <notebooks/explore.ipynb>
+Gene set enrichment analysis <notebooks/enrichment.ipynb>
 FAQ <faq.md>
 Training data <training_data.md>
 References <refs.md>
