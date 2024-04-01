@@ -19,6 +19,109 @@ from sklearn.metrics import f1_score
 # import altair as alt
 from .utils import *
 
+def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1, obsm_name='SCN_score', order_by: str = None):
+    """
+    Plots a heatmap of single cell scores, grouping cells according to a specified .obs column and optionally ordering within each group.
+
+    Args:
+        adata (AnnData): An AnnData object containing the single cell data.
+        groupby (str): The name of the column in .obs used for grouping cells in the heatmap.
+        vmin (float, optional): Minimum value for color scaling. Defaults to 0.
+        vmax (float, optional): Maximum value for color scaling. Defaults to 1.
+        obsm_name (str, optional): The key in .obsm to retrieve the matrix for plotting. Defaults to 'SCN_score'.
+        order_by (str, optional): The name of the column in .obs used for ordering cells within each group. Defaults to None.
+
+    Returns:
+        None: The function plots a heatmap and does not return any value.
+    """
+    # Create a temporary AnnData object with the scores matrix and all original observations
+    adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
+    
+    # Determine sorting criteria
+    if order_by is not None:
+        sort_criteria = [groupby, order_by]
+    else:
+        sort_criteria = [groupby]
+    
+    # Determine the order of cells by sorting based on the criteria
+    sorted_order = adTemp.obs.sort_values(by=sort_criteria).index
+    
+    # Reorder adTemp according to the sorted order
+    adTemp = adTemp[sorted_order, :]
+    
+    # Set figure dimensions and subplot adjustments
+    fsize = [5, 6]
+    plt.rcParams['figure.subplot.bottom'] = 0.25
+    
+    # Plot the heatmap with the sorted and grouped data
+    sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, 
+                  cmap=Batlow_20.mpl_colormap,
+                  dendrogram=False, swap_axes=True, vmin=vmin, vmax=vmax, 
+                  figsize=fsize)
+
+
+def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None):
+    """
+    Plots a stacked bar chart of category proportions for a list of AnnData objects.
+
+    This function takes a list of AnnData objects, and for a specified column in the `.obs` attribute,
+    it plots a stacked bar chart. Each bar represents an AnnData object with segments showing the proportion
+    of each category within that object.
+
+    Args:
+        adata_list (List[anndata.AnnData]): A list of AnnData objects.
+        obs_column (str, optional): The name of the `.obs` column to use for categories. Defaults to 'SCN_class'.
+        labels (List[str], optional): Custom labels for each AnnData object to be displayed on the x-axis.
+            If not provided, defaults to 'AnnData {i+1}' for each object. The length of `labels` must match
+            the number of AnnData objects provided.
+
+    Raises:
+        ValueError: If the length of `labels` does not match the number of AnnData objects.
+
+    Examples:
+        >>> plot_cell_type_proportions([adata1, adata2], obs_column='your_column_name', labels=['Sample 1', 'Sample 2'])
+    """
+    
+    # Ensure labels are provided, or create default ones
+    if labels is None:
+        labels = [f'AnnData {i+1}' for i in range(len(adata_list))]
+    elif len(labels) != len(adata_list):
+        raise ValueError("Length of 'labels' must match the number of AnnData objects provided.")
+    
+    # Extracting category proportions
+    category_counts = []
+    categories = set()
+    for adata in adata_list:
+        counts = adata.obs[obs_column].value_counts(normalize=True)
+        category_counts.append(counts)
+        categories.update(counts.index)
+    
+    categories = sorted(categories)
+    
+    # Preparing the data for plotting
+    proportions = np.zeros((len(categories), len(adata_list)))
+    for i, counts in enumerate(category_counts):
+        for category in counts.index:
+            j = categories.index(category)
+            proportions[j, i] = counts[category]
+    
+    # Plotting
+    fig, ax = plt.subplots()
+    bottom = np.zeros(len(adata_list))
+    for i, category in enumerate(categories):
+        ax.bar(range(len(adata_list)), proportions[i], bottom=bottom, label=category)
+        bottom += proportions[i]
+    
+    ax.set_xticks(range(len(adata_list)))
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_ylabel('Percent')
+    ax.set_title(f'{obs_column} proportions')
+    ax.legend(title='Categories', bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    plt.tight_layout()
+    plt.show()
+
+
 
 def barplot_class_proportions_list(
     ads, 
@@ -240,21 +343,6 @@ def barplot_classifier_f1(adata: AnnData, ground_truth: str = "celltype", class_
         ax.text( 0.03, bar.get_y() + bar.get_height() / 2, label, ha='left', va='center', color = fcolor)
 
     plt.show()
-
-
-def heatmap_scores(
-    adata: AnnData,
-    groupby: str,
-    vmin: float = 0,
-    vmax: float = 1,
-    obsm_name = 'SCN_score'
-):
-    adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
-    adTemp.obs[groupby] = adata.obs[groupby]
-    # guess at appropriate dimensions
-    fsize = [5, 6]
-    plt.rcParams['figure.subplot.bottom'] = 0.25
-    sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, cmap=Batlow_20.mpl_colormap, dendrogram=False, swap_axes=True, vmin = vmin, vmax = vmax, figsize=fsize)
 
 def dotplot_scn_scores(
     adata: AnnData,
