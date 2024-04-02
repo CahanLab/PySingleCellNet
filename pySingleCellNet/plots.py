@@ -16,7 +16,6 @@ from palettable.scientific.sequential import Batlow_20
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
-# import altair as alt
 from .utils import *
 
 def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1, obsm_name='SCN_score', order_by: str = None):
@@ -60,7 +59,7 @@ def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 
                   figsize=fsize)
 
 
-def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None):
+def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None, bar_width=0.75):
     """
     Plots a stacked bar chart of category proportions for a list of AnnData objects.
 
@@ -74,6 +73,7 @@ def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None):
         labels (List[str], optional): Custom labels for each AnnData object to be displayed on the x-axis.
             If not provided, defaults to 'AnnData {i+1}' for each object. The length of `labels` must match
             the number of AnnData objects provided.
+         bar_width (float, optional): The width of the bars in the plot. Defaults to 0.4.
 
     Raises:
         ValueError: If the length of `labels` does not match the number of AnnData objects.
@@ -109,7 +109,7 @@ def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None):
     fig, ax = plt.subplots()
     bottom = np.zeros(len(adata_list))
     for i, category in enumerate(categories):
-        ax.bar(range(len(adata_list)), proportions[i], bottom=bottom, label=category)
+        ax.bar(range(len(adata_list)), proportions[i], bottom=bottom, label=category, width=bar_width, edgecolor='white', linewidth=.5)
         bottom += proportions[i]
     
     ax.set_xticks(range(len(adata_list)))
