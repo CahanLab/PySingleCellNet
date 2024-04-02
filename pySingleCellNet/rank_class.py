@@ -11,6 +11,43 @@ import numpy as np
 import pandas as pd
 from .utils import *
 
+def train_rank_classifier(adata, dLevel, nRand: int = 200, n_trees = 1000):
+    """
+    convert adata to ranked values and pass to sc_makeClassifier, reformat result to make compatible with 
+    scn_classify
+    """
+    labels = adata.obs[dLevel].to_list()
+    xgenes = adata.var_names.to_list()
+
+    adTrainRank = pySCN.rank_genes_fast(adata)
+    stTrain= adTrainRank.obs.copy()
+    expTrain = adTrainRank.to_df()
+    expTrain = expTrain.loc[stTrain.index.values]
+    
+    clf = pySCN.sc_makeClassifier(expTrain, xgenes, labels, nRand=nRand, ntrees = n_trees)
+    return {'tpGeneArray':  None, 'topPairs':None, 'classifier': clf, 'diffExpGenes':None}
+
+
+def rank_classify(adata: AnnData, rf_rank, nrand: int = 0, copy=False) -> AnnData:
+
+    adQuery =  pySCN.rank_genes_fast(adata)
+    stQuery = adata.obs.copy()
+    expQuery = adQuery.to_df()
+    expQuery = expQuery.loc[stQuery.index.values]
+
+    # adHO_1r.X = anndata._core.views.ArrayView(adHO_1r.X)
+    #### newx = pd.DataFrame(data=adQuery.X.toarray(), index = adQuery.obs.index.values, columns= adQuery.var.index.values)
+    clf = rf_rank['classifier']
+    feature_names = clf.feature_names_in_
+    #### newx = newx.reindex(labels=feature_names, axis='columns', fill_value=0)
+    #### xans = pySCN.rf_classPredict(clf, newx, numRand=nrand)
+    expQuery = expQuery.reindex(labels=feature_names, axis='columns', fill_value=0)
+    xans = pySCN.rf_classPredict(clf, expQuery, numRand=nrand)
+    adata.obsm['SCN_score'] = xans.copy()
+    adata.obs['SCN_class'] = xans.idxmax(axis=1)
+    return adata if copy else None
+
+
 def rank_dense_submatrix(submatrix):
     # Operate on a dense submatrix to get the ranks
     return np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, submatrix)
