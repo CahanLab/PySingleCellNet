@@ -18,7 +18,7 @@ from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
 from .utils import *
 
-def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1, obsm_name='SCN_score', order_by: str = None):
+def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1, obsm_name='SCN_score', order_by: str = None, fsize: list = [5, 6]):
     """
     Plots a heatmap of single cell scores, grouping cells according to a specified .obs column and optionally ordering within each group.
 
@@ -29,8 +29,9 @@ def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 
         vmax (float, optional): Maximum value for color scaling. Defaults to 1.
         obsm_name (str, optional): The key in .obsm to retrieve the matrix for plotting. Defaults to 'SCN_score'.
         order_by (str, optional): The name of the column in .obs used for ordering cells within each group. Defaults to None.
-
-    Returns:
+        fsize (list, optional): The figure size. Defaults to [5, 6].
+        
+    Returns:    
         None: The function plots a heatmap and does not return any value.
     """
     # Create a temporary AnnData object with the scores matrix and all original observations
@@ -49,7 +50,7 @@ def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 
     adTemp = adTemp[sorted_order, :]
     
     # Set figure dimensions and subplot adjustments
-    fsize = [5, 6]
+    
     plt.rcParams['figure.subplot.bottom'] = 0.25
     
     # Plot the heatmap with the sorted and grouped data
