@@ -1,14 +1,12 @@
+import pandas as pd
 import scanpy as sc
 import numpy as np
 import pySingleCellNet as pySCN
-import scanpy as sc
-import numpy as np
+import scipy.sparse as sp
 from scipy.sparse import csr_matrix
 from scipy.sparse import issparse
+from scipy.stats import rankdata
 from sklearn.decomposition import FastICA
-import scanpy as sc
-import numpy as np
-import pandas as pd
 from .utils import *
 
 def train_rank_classifier(adata, dLevel, nRand: int = 200, n_trees = 1000):
@@ -19,7 +17,8 @@ def train_rank_classifier(adata, dLevel, nRand: int = 200, n_trees = 1000):
     labels = adata.obs[dLevel].to_list()
     xgenes = adata.var_names.to_list()
 
-    adTrainRank = pySCN.rank_genes_fast(adata)
+    adTrainRank = pySCN.rank_genes_fast2(adata)
+
     stTrain= adTrainRank.obs.copy()
     expTrain = adTrainRank.to_df()
     expTrain = expTrain.loc[stTrain.index.values]
@@ -30,7 +29,7 @@ def train_rank_classifier(adata, dLevel, nRand: int = 200, n_trees = 1000):
 
 def rank_classify(adata: AnnData, rf_rank, nrand: int = 0, copy=False) -> AnnData:
 
-    adQuery =  pySCN.rank_genes_fast(adata)
+    adQuery =  pySCN.rank_genes_fast2(adata)
     stQuery = adata.obs.copy()
     expQuery = adQuery.to_df()
     expQuery = expQuery.loc[stQuery.index.values]
@@ -50,12 +49,14 @@ def rank_classify(adata: AnnData, rf_rank, nrand: int = 0, copy=False) -> AnnDat
 
 def rank_dense_submatrix(submatrix):
     # Operate on a dense submatrix to get the ranks
-    return np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, submatrix)
+    # return np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, submatrix)
+    return np.apply_along_axis(lambda x: rankdata(-x, method='average') - 1, 1, submatrix)
 
-def rank_genes_fast(adata):
+def rank_genes_fast2(adOrig):
     """
-    Efficiently replace each gene's expression value with its rank for each cell.
-    
+    Efficiently replace each gene's expression value with its rank for each cell such that the highest values get the highest ranks
+    genes that are not detected are assigned rank of 0
+    ties are resolved by averaging
     Parameters:
     -----------
     adata : AnnData
@@ -64,9 +65,66 @@ def rank_genes_fast(adata):
     Returns:
     --------
     AnnData
-        The modified AnnData object with ranked expression values.
+        an AnnData object with ranked expression values as described above
+    """
+    adata = adOrig.copy()
+    # Check if matrix is sparse and get total number of rows
+    is_sparse_mtx = issparse(adata.X)
+    n_rows = adata.X.shape[0]
+    if is_sparse_mtx:
+        ranked_matrix = rank_dense_submatrix(adata.X.toarray())
+    else:
+        ranked_matrix = rank_dense_submatrix(adata.X)
+
+    # handle undetected genes
+    ranked_matrix = zero_out_b_where_a_is_zero(adata.X, ranked_matrix)
+    
+    # Update the AnnData object's expression matrix with ranks
+    # return ranked_matrix
+    adata.X = ranked_matrix
+    return adata
+    
+
+def zero_out_b_where_a_is_zero(a, b):
+    """
+    Set entries in matrix `b` to 0 where the corresponding entries in matrix `a` are 0.
+    
+    Parameters:
+    a (csr_matrix or np.ndarray): Sparse matrix `a`.
+    b (csr_matrix or np.ndarray): Sparse matrix `b`, which will be modified in-place.
+    
+    Returns:
+    csr_matrix: Modified sparse matrix `b`.
+    """
+    # Convert to csr_matrix if necessary
+    if not sp.isspmatrix_csr(a):
+        a = csr_matrix(a)
+    if not sp.isspmatrix_csr(b):
+        b = csr_matrix(b)
+    # Create a mask where `a` is non-zero
+    a_nonzero_mask = a.copy()
+    a_nonzero_mask.data = np.ones_like(a_nonzero_mask.data)
+    # Element-wise multiply b with the mask
+    b = b.multiply(a_nonzero_mask)
+    return b
+
+
+def rank_genes_fast(adOrig):
+    """
+    Efficiently replace each gene's expression value with its rank for each cell.
+    
+    Parameters:
+    -----------
+    adOrig : AnnData
+        The annotated data matrix.
+
+    Returns:
+    --------
+    AnnData
+        A new AnnData object with ranked expression values.
     """
     
+    adata = adOrig.copy()
     # Check if matrix is sparse and get total number of rows
     is_sparse_mtx = issparse(adata.X)
     n_rows = adata.X.shape[0]

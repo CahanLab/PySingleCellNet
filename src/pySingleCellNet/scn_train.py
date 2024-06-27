@@ -8,8 +8,11 @@ from typing import Dict
 from sklearn.ensemble import RandomForestClassifier
 from scipy.sparse import csr_matrix
 import warnings
+import matplotlib.pyplot as plt
 from .utils import *
 from .tsp_rf import *
+# from .plots import get_unique_colors # I moved this to utils
+
 
 def randomize(expDat: pd.DataFrame, num: int = 50) -> pd.DataFrame:
     """
@@ -111,18 +114,21 @@ def scn_classify(adata: AnnData, rf_tsp, nrand: int = 0, copy=False) -> AnnData:
     classRes = scn_predict(rf_tsp, adata, nrand=nrand)
     
     # Get the categories (i.e., predicted cell types) from the classification result
-    categories = classRes.columns.values
-    
+    # categories = classRes.columns.values
+    # possible_classes = rf_tsp['classifier'].classes_
+    possible_classes = pd.Categorical(classRes.columns)
+ 
     # add the classification result as to `obsm`
 #    adNew = AnnData(classRes, obs=adata.obs, var=pd.DataFrame(index=categories))
     adata.obsm['SCN_score'] = classRes
 
     # Add a new column to `obs` for the predicted cell types
-    adata.obs['SCN_class'] = classRes.idxmax(axis=1)
+    predicted_classes = classRes.idxmax(axis=1)
+    adata.obs['SCN_class'] = pd.Categorical(predicted_classes, categories=possible_classes, ordered=True)
+    # adata.obs['SCN_class'] = classRes.idxmax(axis=1)
 
-    ##
-    ## adNew.obs['SCN_class'] = classRes.idxmax(axis=1)
-    
+    adata.uns['SCN_class_colors'] = rf_tsp['ctColors']
+        
     # return copy if called for
     return adata if copy else None
 
@@ -145,7 +151,20 @@ def rf_classPredict(rfObj,expQuery,numRand=50):
     xpreds= pd.DataFrame(rfObj.predict_proba(expQuery), columns= rfObj.classes_, index=expQuery.index)
     return xpreds
 
-def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTrees = 1000,stratify=False,counts_per_cell_after=1e4, scaleMax=10, limitToHVG=True, normalization = True, include_all_genes = False, propOther=0.5):
+def scn_train(aTrain,
+    dLevel,
+    nTopGenes = 100,
+    nTopGenePairs = 100,
+    nRand = 100,
+    nTrees = 1000,
+    stratify = False,
+    counts_per_cell_after = 1e4,
+    scaleMax = 10,
+    limitToHVG = True,
+    normalization = True,
+    include_all_genes = False,
+    propOther=0.5
+):
     warnings.filterwarnings('ignore')
     stTrain= aTrain.obs
     
@@ -198,7 +217,16 @@ def scn_train(aTrain,dLevel,nTopGenes = 100,nTopGenePairs = 100,nRand = 100, nTr
     ## #### ## tmpAns = dict(preds = pdTrain.loc[:, xpairs], y_s = grps)
     ## #### ## return tmpAns
     ## #### ## return tspRF
-    return {'tpGeneArray': cgenesA, 'topPairs':xpairs, 'classifier': tspRF, 'diffExpGenes':cgenes_list}
+
+    ## set celltype colors
+    ## Do this here because we add a 'rand' celltype
+    
+    ## assume this is a Series
+    cell_types = stTrain[dLevel].cat.categories.to_list()
+    cell_types.append('rand')
+    unique_colors = get_unique_colors(len(cell_types))
+    cell_type_to_color = {cell_type: color for cell_type, color in zip(cell_types, unique_colors)}    
+    return {'tpGeneArray': cgenesA, 'topPairs':xpairs, 'classifier': tspRF, 'diffExpGenes':cgenes_list, 'ctColors':cell_type_to_color}
 
 
 def add_training_dlevel(adata, dlevel):

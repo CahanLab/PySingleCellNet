@@ -7,8 +7,13 @@ import seaborn as sns
 import warnings
 import umap
 import anndata as ad
+import igraph as ig
+# from igraph import Graph
+from palettable.colorbrewer.qualitative import Set2_6
+from palettable.tableau import GreenOrange_6
+from palettable.cartocolors.qualitative import Safe_6
 from palettable.cartocolors.qualitative import Vivid_4
-from palettable.cartocolors.qualitative import Vivid_3
+from palettable.cartocolors.qualitative import Vivid_6
 from palettable.cartocolors.qualitative import Vivid_10
 from palettable.scientific.diverging import Roma_20
 from palettable.scientific.sequential import LaJolla_20
@@ -17,6 +22,58 @@ from anndata import AnnData
 from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
 from .utils import *
+
+def convert_color(color_array): 
+    return tuple(color_array)
+
+def plot_ontogeny_graph(gra, color_dict): 
+    ig.config['plotting.backend'] = 'matplotlib'
+    v_style = {}
+    v_style["layout"] = "fruchterman_reingold"
+    v_style["vertex_label_dist"] = 2.5
+    v_style["vertex_label_angle"] = 3 # in radians
+    v_style["bbox"] = (600,600)
+    v_style["margin"] = (50)
+
+    for vertex in gra.vs:
+        vertex["color"] = convert_color(color_dict.get(vertex["name"], np.array([0.5, 0.5, 0.5]))) 
+
+    # Normalize node sizes for better visualization
+    max_size = 50  # Maximum size for visualization
+    min_size = 10  # Minimum size for visualization
+    ncells = gra.vs["ncells"]
+    node_sizes = [min_size + (size / max(ncells)) * (max_size - min_size) for size in ncells]
+    fig, ax = plt.subplots()
+    ig.plot(gra, **v_style, vertex_size=node_sizes)
+    plt.show()
+
+
+def get_unique_colors(n_colors):
+    """
+    Generate a list of unique colors from the Tab20, Tab20b, and Tab20c colormaps.
+
+    Parameters:
+    - n_colors: The number of unique colors needed.
+
+    Returns:
+    - A list of unique colors.
+    """
+    # Get the colormaps
+    tab20 = plt.get_cmap('tab20').colors
+    tab20b = plt.get_cmap('tab20b').colors
+    tab20c = plt.get_cmap('tab20c').colors
+    
+    # Combine the colors from the colormaps
+    combined_colors = np.vstack([tab20, tab20b, tab20c])
+    
+    # Check if the requested number of colors exceeds the available unique colors
+    if n_colors > len(combined_colors):
+        raise ValueError(f"Requested number of colors ({n_colors}) exceeds the available unique colors ({len(combined_colors)}).")
+    
+    # Select the required number of unique colors
+    selected_colors = combined_colors[:n_colors]
+    return selected_colors
+
 
 def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1, obsm_name='SCN_score', order_by: str = None):
     """
@@ -59,7 +116,107 @@ def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 
                   figsize=fsize)
 
 
-def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None, bar_width=0.75):
+
+def stacked_barplot_composition(
+    adata: AnnData, 
+    groupby: str, 
+    obs_column = 'SCN_class', 
+    labels = None, 
+    bar_width: float = 0.75, 
+    color_dict = None
+):
+    """
+    Plots a stacked bar chart of cell type proportions for a single AnnData object grouped by a specified column.
+
+    This function takes an AnnData object, and for a specified column in the `.obs` attribute, it groups the data
+    and plots a stacked bar chart. Each bar represents a group with segments showing the proportion of each category
+    within that group.
+
+    Args:
+        adata (anndata.AnnData): An AnnData object.
+        groupby (str): The column in `.obs` to group by.
+        obs_column (str, optional): The name of the `.obs` column to use for categories. Defaults to 'SCN_class'.
+        labels (List[str], optional): Custom labels for each group to be displayed on the x-axis.
+            If not provided, the unique values of the groupby column will be used. The length of `labels` must match
+            the number of unique groups.
+        bar_width (float, optional): The width of the bars in the plot. Defaults to 0.75.
+        color_dict (Dict[str, str], optional): A dictionary mapping categories to specific colors. If not provided,
+            default colors will be used.
+
+    Raises:
+        ValueError: If the length of `labels` does not match the number of unique groups.
+
+    Examples:
+        >>> plot_grouped_cell_type_proportions(adata, groupby='sample', obs_column='your_column_name')
+    """
+    
+    # Ensure the groupby column exists in .obs
+    if groupby not in adata.obs.columns:
+        raise ValueError(f"The groupby column '{groupby}' does not exist in the .obs attribute.")
+    
+    # Extract unique groups and ensure labels are provided or create default ones
+    # unique_groups = adata.obs[groupby].unique()
+    unique_groups = adata.obs[groupby].cat.categories.to_list()
+    if labels is None:
+        labels = unique_groups
+    elif len(labels) != len(unique_groups):
+        raise ValueError("Length of 'labels' must match the number of unique groups.")
+    
+    if color_dict is None:
+        color_dict = adata.uns['SCN_class_colors'] # should parameterize this
+
+    # Extracting category proportions per group
+    category_counts = []
+    categories = set()
+    for group in unique_groups:
+        subset = adata[adata.obs[groupby] == group]
+        counts = subset.obs[obs_column].value_counts(normalize=True)
+        category_counts.append(counts)
+        categories.update(counts.index)
+    
+    categories = sorted(categories)
+    
+    # Preparing the data for plotting
+    proportions = np.zeros((len(categories), len(unique_groups)))
+    for i, counts in enumerate(category_counts):
+        for category in counts.index:
+            j = categories.index(category)
+            proportions[j, i] = counts[category]
+    
+    # Plotting
+    fig, ax = plt.subplots()
+    bottom = np.zeros(len(unique_groups))
+    for i, category in enumerate(categories):
+        color = color_dict[category] if color_dict and category in color_dict else None
+        ax.bar(
+            range(len(unique_groups)), 
+            proportions[i], 
+            bottom=bottom, 
+            label=category, 
+            width=bar_width, 
+            edgecolor='white', 
+            linewidth=.5,
+            color=color
+        )
+        bottom += proportions[i]
+    
+    ax.set_xticks(range(len(unique_groups)))
+    ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_ylabel('Percent')
+    ax.set_title(f'{obs_column} proportions by {groupby}')
+    ax.legend(title='Categories', bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    plt.tight_layout()
+    plt.show()
+
+
+def stacked_barplot_list_composition(
+    adata_list, 
+    obs_column = 'SCN_class', 
+    labels = None, 
+    bar_width: float = 0.75, 
+    color_dict = None
+):
     """
     Plots a stacked bar chart of category proportions for a list of AnnData objects.
 
@@ -73,7 +230,9 @@ def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None, 
         labels (List[str], optional): Custom labels for each AnnData object to be displayed on the x-axis.
             If not provided, defaults to 'AnnData {i+1}' for each object. The length of `labels` must match
             the number of AnnData objects provided.
-         bar_width (float, optional): The width of the bars in the plot. Defaults to 0.4.
+        bar_width (float, optional): The width of the bars in the plot. Defaults to 0.75.
+        color_dict (Dict[str, str], optional): A dictionary mapping categories to specific colors. If not provided,
+            default colors will be used.
 
     Raises:
         ValueError: If the length of `labels` does not match the number of AnnData objects.
@@ -105,11 +264,24 @@ def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None, 
             j = categories.index(category)
             proportions[j, i] = counts[category]
     
+    if color_dict is None:
+        color_dict = adata_list[0].uns['SCN_class_colors'] # should parameterize this
+
     # Plotting
     fig, ax = plt.subplots()
     bottom = np.zeros(len(adata_list))
     for i, category in enumerate(categories):
-        ax.bar(range(len(adata_list)), proportions[i], bottom=bottom, label=category, width=bar_width, edgecolor='white', linewidth=.5)
+        color = color_dict[category] if color_dict and category in color_dict else None
+        ax.bar(
+            range(len(adata_list)), 
+            proportions[i], 
+            bottom=bottom, 
+            label=category, 
+            width=bar_width, 
+            edgecolor='white', 
+            linewidth=.5,
+            color=color
+        )
         bottom += proportions[i]
     
     ax.set_xticks(range(len(adata_list)))
@@ -121,9 +293,7 @@ def plot_cell_type_proportions(adata_list, obs_column='SCN_class', labels=None, 
     plt.tight_layout()
     plt.show()
 
-
-
-def barplot_class_proportions_list(
+def barplot_categories_list(
     ads, 
     titles=None,
     scn_classes_to_display=None,
@@ -147,9 +317,24 @@ def barplot_class_proportions_list(
         all_classes = scn_classes_to_display
     else:
         all_classes = all_classes_union
+
+    # setup colors
+    all_categories = set().union(*(df[bar_subgroups_obsname].unique() for df in dfs))
+    
+
     # Create a figure with multiple subplots
     fig, axes = plt.subplots(1, num_dfs, figsize=(6 * num_dfs, 8), sharey=True)
     for ax, df, title in zip(axes, dfs, titles):
+
+
+        # Ensure SCN_class categories are consistent
+        # I think if adatas were classified with same clf, then they should have the same SCN_class categories even if not all cell types are predicted in a given adata
+        df['SCN_class'] = df['SCN_class'].astype('category')
+        df['SCN_class_type'] = df['SCN_class_type'].astype('category')
+
+        df['SCN_class'] = df['SCN_class'].cat.set_categories(df['SCN_class'].cat.categories)
+        df['SCN_class_type'] = df['SCN_class_type'].cat.set_categories(df['SCN_class_type'].cat.categories)
+
         # Reindex and filter each DataFrame
         counts = df.groupby(bar_groups_obsname)[bar_subgroups_obsname].value_counts().unstack().reindex(all_classes).fillna(0)
         total_counts = counts.sum(axis=1)
@@ -160,7 +345,9 @@ def barplot_class_proportions_list(
         total_percent = (total_counts / total_counts.sum() * 100).round(1)  # Converts to percentage and round
 
         # Plotting
-        proportions.plot(kind='barh', stacked=True, colormap=Vivid_3.mpl_colormap, width=bar_height, ax=ax, legend=False)
+        ### proportions.plot(kind='barh', stacked=True, colormap=Vivid_3.mpl_colormap, width=bar_height, ax=ax, legend=False)
+
+        proportions.plot(kind='barh', stacked=True, colormap=Vivid_6.mpl_colormap, width=bar_height, ax=ax, legend=False)
         # Modify colors from colormap to include alpha transparency
         # colors = [Vivid_3.mpl_colormap(i) for i in range(Vivid_3.mpl_colormap.N)]
         # new_colors = [(r,g,b,alpha_values.iloc[i]) for i, (r,g,b,a) in enumerate(colors)]  # Modify alpha for each color
@@ -186,31 +373,80 @@ def barplot_class_proportions_list(
     plt.tight_layout()
     return plt
 
-
-
 def barplot_scn_categories(
     adata: AnnData,
-    bar_height = 0.8
+    scn_classes_to_display = None, 
+    color_list = GreenOrange_6.mpl_colors,
+    bar_height=0.8
 ):
+    # Copy the obs DataFrame to avoid modifying the original data
     df = adata.obs.copy()
-    # Group by 'SCN_class' and get dummies for 'SCN_class_type'
-    counts = df.groupby('SCN_class')['SCN_class_type'].value_counts().unstack().fillna(0)
+    
+    all_classes = df['SCN_class_type'].unique()
+    if scn_classes_to_display is not None:
+        if not all(cls in all_classes for cls in scn_classes_to_display):
+            raise ValueError("Some values in 'scn_classes_to_display' do not match available 'SCN_class' values in the provided DataFrames.")
+        all_classes = scn_classes_to_display
+    
+    # Ensure the columns 'SCN_class' and 'SCN_class_type' exist
+    if 'SCN_class' not in df.columns or 'SCN_class_type' not in df.columns:
+        raise KeyError("Columns 'SCN_class' and 'SCN_class_type' must be present in adata.obs")
+    
+    # Ensure SCN_class categories are consistent
+    df['SCN_class'] = df['SCN_class'].astype('category')
+    df['SCN_class_type'] = df['SCN_class_type'].astype('category')
+
+    df['SCN_class'] = df['SCN_class'].cat.set_categories(df['SCN_class'].cat.categories)
+    df['SCN_class_type'] = df['SCN_class_type'].cat.set_categories(df['SCN_class_type'].cat.categories)
+
+    # Group by 'SCN_class' and get value counts for 'SCN_class_type'
+    try:
+        counts = df.groupby('SCN_class')['SCN_class_type'].value_counts().unstack().fillna(0)
+    except Exception as e:
+        print("Error during groupby and value_counts operations:", e)
+        return
+    
+    # Calculate proportions
     proportions = counts.divide(counts.sum(axis=1), axis=0)
+    
+    # Calculate total counts
     total_counts = counts.sum(axis=1)
+    total_percent = (total_counts / total_counts.sum() * 100).round(1)  # Converts to percentage and round
+
+    
     # Determine the number of unique SCN_classes to adjust text size
     num_classes = len(df['SCN_class'].unique())
-    text_size = max(min(12 - num_classes // 2, 10), 5)  # Adjust text size based on number of classes
+    # text_size = max(min(12 - num_classes // 2, 10), 5)  # Adjust text size based on number of classes
+    
     # Plotting
-    ax = proportions.plot(kind='barh', stacked=True, colormap=Vivid_3.mpl_colormap, width=bar_height)
+    # ax = proportions.plot(kind='barh', stacked=True, colormap=Vivid_3, width=bar_height)
+    #### ax = proportions.plot(kind='barh', stacked=True, colormap=Vivid_3.mpl_colormap, width=bar_height)
+    #### ax = proportions.plot(kind='barh', stacked=True, colormap=Vivid_6.mpl_colormap, width=bar_height)
+    SCN_class_category_names = ["Singular", "None", "Parent.Child", "Sibling", "Hybrid", "Gp.Gc"]
+    SCN_class_category_color_dict = dict(zip(SCN_class_category_names, color_list))
+    ax = proportions.plot(kind='barh', stacked=True, color=SCN_class_category_color_dict, width=bar_height)
+    
+    # Set axis labels and title
     ax.set_xlabel('Proportion')
     ax.set_ylabel('SCN Class')
-    ax.set_title('Proportions of SCN Class Types with Total Counts')
-    # Adding total counts to the right of each bar
-    for i, value in enumerate(total_counts):
-        ax.text(0.95, i, int(value), ha='right', va='center', color='white',fontsize=text_size)
-    plt.legend(title='SCN Class Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.set_title('Cell typing categorization')
+    
+    # Adding adjusted internal total counts within each bar
+    text_size = max(min(12 - num_classes // 2, 10), 7) # Adjust text size
+    for i, (count, percent) in enumerate(zip(total_counts, total_percent)):
+        text = f'{int(count)} ({percent}%)'  # Text to display
+        # text = f'({percent}%)'  # Text to display
+        ax.text(0.95, i, text, ha='right', va='center', color='white', fontsize=text_size)
+
+    # for i, value in enumerate(total_counts):
+    #    ax.text(0.95, i, int(value), ha='right', va='center', color='white',fontsize=text_size)
+
+    # Add legend
+    plt.legend(title='Category', bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.tight_layout()
+    
     return plt
+
 
 
 def dotplot_deg(

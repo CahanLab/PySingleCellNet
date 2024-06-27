@@ -6,8 +6,6 @@ from itertools import combinations
 from .stats import * 
 import random as rand 
 
-### from stats import * 
-
 
 def csRenameOrth(adQuery,adTrain,orthTable,speciesQuery='human',speciesTrain='mouse'):
     _,_,cgenes=np.intersect1d(adQuery.var_names.values, orthTable[speciesQuery], return_indices=True)

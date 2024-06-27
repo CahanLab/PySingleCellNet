@@ -13,6 +13,38 @@ import anndata
 # import pySingleCellNet as pySCN
 #import pacmap
 import copy
+import igraph as ig
+from collections import defaultdict
+
+
+def determine_relationships(graph: ig.Graph):
+    relationships = defaultdict(dict)
+    for node in graph.vs:
+        node_label = node['name']
+        # Parent-child relationships
+        for neighbor in graph.neighbors(node, mode="OUT"):
+            neighbor_label = graph.vs[neighbor]['name']
+            relationships[node_label][neighbor_label] = "parent_child"
+            relationships[neighbor_label][node_label] = "parent_child"  # Ensure symmetry
+        # Sibling relationships
+        parents = graph.neighbors(node, mode="IN")
+        for parent in parents:
+            parent_label = graph.vs[parent]['name']
+            siblings = [graph.vs[sibling]['name'] for sibling in graph.neighbors(parent, mode="OUT") if sibling != node.index]
+            for sibling in siblings:
+                if sibling not in relationships[node_label]:
+                    relationships[node_label][sibling] = "sibling"
+                    relationships[sibling][node_label] = "sibling"  # Ensure symmetry
+        # Grandparent-child relationships
+        for parent in parents:
+            grandparents = graph.neighbors(parent, mode="IN")
+            for grandparent in grandparents:
+                grandparent_label = graph.vs[grandparent]['name']
+                if grandparent_label not in relationships[node_label]:
+                    relationships[grandparent_label][node_label] = "grandparent_grandchild"
+                    relationships[node_label][grandparent_label] = "grandparent_grandchild"  # Ensure symmetry
+    return dict(relationships)
+
 
 
 def gsea_on_deg(
@@ -459,7 +491,74 @@ def make_diff_gene_dict(
     ans['geneTab_dict'] = tmp_dict
     return ans
     
-def class_by_threshold(adata_c: AnnData, thresholds: pd.DataFrame, columns_to_ignore: list = ["rand"], inplace = True ):
+
+def class_by_threshold(adata_c: AnnData, thresholds: pd.DataFrame, relationships: dict = None, columns_to_ignore: list = ["rand"], inplace=True):
+    """
+    Classify cells based on SCN scores and thresholds, and annotate hybrid cells based on lineage relationships.
+    
+    Args:
+        adata_c (AnnData): Annotated data matrix with SCN scores in `.obsm`.
+        thresholds (pd.DataFrame): DataFrame containing thresholds for each cell type.
+        relationships (dict, optional): Dictionary of relationships between cell types. If None, all hybrid cells are given a 'Hybrid' SCN_class_type. Defaults to None.
+        columns_to_ignore (list, optional): List of columns to ignore in SCN scores. Defaults to ["rand"].
+        inplace (bool, optional): If True, modifies the AnnData object in place. If False, returns a new AnnData object. Defaults to True.
+    
+    Returns:
+        AnnData or None: Returns the modified AnnData object if inplace is False, otherwise returns None.
+    """
+    SCN_scores = adata_c.obsm["SCN_score"].copy()
+    SCN_scores.drop(columns=columns_to_ignore, inplace=True, errors='ignore')
+    
+    # Create a boolean DataFrame indicating which values exceed the thresholds 
+    exceeded = SCN_scores.sub(thresholds.squeeze(), axis=1) > 0 
+    true_counts = exceeded.sum(axis=1)
+
+    # Categorize the classification results based on number of passing classes
+    class_type = ["None"] * len(true_counts)
+    class_type = pd.DataFrame(class_type, index=true_counts.index.copy(), columns=['SCN_class_type'])
+    singulars = true_counts == 1
+    class_type.loc[singulars] = "Singular"
+    hybrids = true_counts > 1
+
+    # Create a list of lists of column names where values exceed the thresholds 
+    result_list = [[col for col in exceeded.columns[exceeded.iloc[row].values]] for row in range(exceeded.shape[0])]
+    
+    if relationships is not None:
+        for idx, cell_types in enumerate(result_list):
+            if len(cell_types) > 1:
+                # Determine the type of hybrid relationship
+                hybrid_type = "Hybrid"
+                for i, ct1 in enumerate(cell_types):
+                    for ct2 in cell_types[i+1:]:
+                        if ct1 in relationships and ct2 in relationships[ct1]:
+                            if relationships[ct1][ct2] == "parent_child":
+                                hybrid_type = "Parent.Child"
+                            elif relationships[ct1][ct2] == "sibling":
+                                hybrid_type = "Sibling"
+                            elif relationships[ct1][ct2] == "grandparent_grandchild":
+                                hybrid_type = "Gp.Gc"
+                class_type.iloc[idx] = hybrid_type
+    else:
+        class_type.loc[hybrids] = "Hybrid"
+
+    ans = ['_'.join(lst) for lst in result_list]
+    ans = [i if len(i) != 0 else "None" for i in ans]
+
+    if inplace:
+        adata_c.obs['SCN_class_emp'] = ans.copy()
+        adata_c.obs['SCN_class_type'] = class_type.copy()
+        return None
+    else:
+        adata_c.obs['SCN_class_emp'] = ans.copy()
+        adata_c.obs['SCN_class_type'] = class_type.copy()
+        return adata_c
+
+
+
+
+# 06-24-24 PC
+# Deprecate this func
+def class_by_threshold_old(adata_c: AnnData, thresholds: pd.DataFrame, columns_to_ignore: list = ["rand"], inplace = True ):
     SCN_scores = adata_c.obsm["SCN_score"].copy()
     SCN_scores.drop(columns = columns_to_ignore, inplace=True, errors = 'ignore')
     
@@ -518,7 +617,8 @@ def wrap_max_min_path(adata, net, cateres, ct_name_column):
         elif adata.obs.loc[ob, 'nCates'] == 1:
             adata.obs.loc[ob, 'ct_dist'] = 0
 
-    adata = comp_max_min_path(adata, net, cateres, 'ct')
+    #adata = comp_max_min_path(adata, net, cateres, 'ct')
+    adata = comp_max_min_path(adata, net, cateres, ct_name_column)
 
     return adata
 
@@ -568,6 +668,23 @@ def cate_scn(adata_c, thrs):
     return CateRes
 
 
+def graph_from_nodes_and_edges(edge_dataframe, node_dataframe, attribution_column_names, directed=True):
+    gra = ig.Graph(directed=directed)
+    attr = {}
+    for attr_names in attribution_column_names:
+        attr[attr_names] = node_dataframe[attr_names].to_numpy()
+    
+    gra.add_vertices(n=node_dataframe.id.to_numpy(), attributes=attr)
+    for ind in edge_dataframe.index:
+        tempsource = edge_dataframe.loc[ind].loc['from']
+        temptarget = edge_dataframe.loc[ind].loc['to']
+        gra.add_edges([(tempsource, temptarget)])
+    
+    gra.vs["label"] = gra.vs["id"]
+    return gra
+
+
+### 06-24-24: deprecate this function
 def graph_from_data_frame(Net, edge_dataframe, node_dataframe, attribution_column_names, directed=True):
     attr = {}
     for attr_names in attribution_column_names:
