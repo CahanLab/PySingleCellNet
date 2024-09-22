@@ -8,6 +8,7 @@ import mygene
 import anndata as ad
 from scipy.sparse import issparse
 import re
+from alive_progress import alive_bar
 
 def convert_color(color_array): 
     return tuple(color_array)
@@ -803,7 +804,7 @@ def ctRename(sampTab, annCol, oldName, newName):
     newSampTab.loc[oldRows,annCol]= newName
     return newSampTab
 
-#adapted from Sam's code
+#
 def splitCommonAnnData(adata, ncells, dLevel="cell_ontology_class", cellid = None, cells_reserved = 3):
     if cellid == None: 
          adata.obs["cellid"] = adata.obs.index
@@ -811,13 +812,17 @@ def splitCommonAnnData(adata, ncells, dLevel="cell_ontology_class", cellid = Non
     cts = set(adata.obs[dLevel])
 
     trainingids = np.empty(0)
-    for ct in cts:
-        print(ct, ": ")
-        aX = adata[adata.obs[dLevel] == ct, :]
-        ccount = aX.n_obs - cells_reserved
-        ccount = min([ccount, ncells])
-        print(aX.n_obs)
-        trainingids = np.append(trainingids, np.random.choice(aX.obs[cellid].values, ccount, replace = False))
+    
+    n_cts = len(cts)
+    with alive_bar(n_cts, title="Splitting data") as bar:
+        for ct in cts:
+            # print(ct, ": ")
+            aX = adata[adata.obs[dLevel] == ct, :]
+            ccount = aX.n_obs - cells_reserved
+            ccount = min([ccount, ncells])
+            # print(aX.n_obs)
+            trainingids = np.append(trainingids, np.random.choice(aX.obs[cellid].values, ccount, replace = False))
+            bar()
 
     val_ids = np.setdiff1d(adata.obs[cellid].values, trainingids, assume_unique = True)
     aTrain = adata[np.isin(adata.obs[cellid], trainingids, assume_unique = True),:]

@@ -201,7 +201,7 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
         res=[]
         grps=np.unique(cell_labels)
         for g in grps:
-            print(g)
+            # print(g)
             genes=cgenes_list[g]
             pairTab=makePairTab(genes)
             nPairs=len(pairTab)

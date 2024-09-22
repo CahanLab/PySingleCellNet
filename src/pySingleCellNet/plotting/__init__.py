@@ -20,6 +20,10 @@ from .heatmap import (
     heatmap_genes,
 )
 
+from .scatter import (
+    scatter_qc_adata
+)
+
 # API
 __all__ = [
     "stackedbar_composition",
@@ -35,5 +39,6 @@ __all__ = [
     "heatmap_scores",
     "heatmap_gsea",
     "heatmap_genes",
+    "scatter_qc_adata"
 ]
 

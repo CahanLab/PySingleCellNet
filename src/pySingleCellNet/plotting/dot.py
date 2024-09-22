@@ -49,9 +49,9 @@ def dotplot_deg(
     adata: AnnData,
     diff_gene_dict: dict,
     #samples_obsvals: list = [],
-    groupby_obsname: str = "comb_sampname",
-    cellgrp_obsname: str = "comb_cellgrp",    
-    cellgrp_obsvals: list = [],
+    groupby_obsname: str = "comb_sampname", # I think that this is the column that splits cells for DEG
+    cellgrp_obsname: str = "comb_cellgrp",    # I think that this is the column that splits into discint clusters or cell types
+    cellgrp_obsvals: list = [], # this is the subset of clusters or cell types to limit this visualization to
     num_genes: int = 10, 
     order_by = 'scores',
     new_obsname = 'grp_by_samp',
@@ -157,7 +157,7 @@ def dotplot_scn_scores(
     adTemp.obs[groupby] = adata.obs[groupby]
     sc.pl.dotplot(adTemp, adTemp.var_names.values, groupby=groupby, expression_cutoff=expression_cutoff, cmap=Batlow_20.mpl_colormap, colorbar_title="SCN score")
 
-def umap_scores(
+def umap_scores_old(
     adata: AnnData,
     scn_classes: list,
     obsm_name = 'SCN_score'
@@ -165,4 +165,47 @@ def umap_scores(
     adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
     adTemp.obsm['X_umap'] = adata.obsm['X_umap'].copy()
     sc.pl.umap(adTemp,color=scn_classes, alpha=.75, s=10, vmin=0, vmax=1)
+
+
+def umap_scores(
+    adata: AnnData,
+    scn_classes: list,
+    obsm_name='SCN_score',
+    alpha=0.75,
+    s=10,
+    display=True
+):
+    """
+    Plots UMAP projections of scRNA-seq data with specified scores.
+
+    Args:
+        adata (AnnData): 
+            The AnnData object containing the scRNA-seq data.
+        scn_classes (list): 
+            A list of SCN classes to visualize on the UMAP.
+        obsm_name (str, optional): 
+            The name of the obsm key containing the SCN scores. Defaults to 'SCN_score'.
+        alpha (float, optional): 
+            The transparency level of the points on the UMAP plot. Defaults to 0.75.
+        s (int, optional): 
+            The size of the points on the UMAP plot. Defaults to 10.
+        display (bool, optional): 
+            If True, the plot is displayed immediately. If False, the axis object is returned. Defaults to True.
+
+    Returns:
+        matplotlib.axes.Axes or None: 
+            If `display` is False, returns the matplotlib axes object. Otherwise, returns None.
+    """
+    # Create a temporary AnnData object with the desired obsm
+    adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
+    adTemp.obsm['X_umap'] = adata.obsm['X_umap'].copy()
+    
+    # Create the UMAP plot
+    ax =c(adTemp, color=scn_classes, alpha=alpha, s=s, vmin=0, vmax=1, show=False)
+    
+    # Display or return the axis
+    if display:
+        plt.show()
+    else:
+        return ax
 
