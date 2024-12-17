@@ -20,3 +20,7 @@ del(selected_colors)
 # fonts
 
 # ...
+
+# Arbitrary strings
+
+SCN_DIFFEXP_KEY = "scnDiffExp"

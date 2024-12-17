@@ -30,7 +30,10 @@ setup(name='pySingleCellNet',
         'umap-learn',
         'mygene',
         'palettable',
-        'gseapy'
+        'gseapy',
+        'alive_progress',
+        'python-igraph',
+        'marsilea'
     ],
     project_urls={
         'Documentation': 'https://pysinglecellnet.readthedocs.io/en/latest/',

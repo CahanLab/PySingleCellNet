@@ -19,13 +19,14 @@ from palettable.scientific.sequential import Batlow_20
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
+
 # from ..utils import *
 from pySingleCellNet.config import SCN_CATEGORY_COLOR_DICT
 
-
-import numpy as np
-import matplotlib.pyplot as plt
+from scipy.spatial.distance import pdist, squareform
+from scipy.cluster.hierarchy import linkage, leaves_list
 from anndata import AnnData
+
 
 def stackedbar_composition(
     adata: AnnData, 
@@ -34,11 +35,13 @@ def stackedbar_composition(
     labels=None, 
     bar_width: float = 0.75, 
     color_dict=None, 
-    ax=None
+    ax=None,
+    order_by_similarity: bool = False,
+    similarity_metric: str = 'correlation'
 ):
     """
     Plots a stacked bar chart of cell type proportions for a single AnnData object grouped by a specified column.
-
+    
     Args:
         adata (anndata.AnnData): An AnnData object.
         groupby (str): The column in `.obs` to group by.
@@ -50,31 +53,28 @@ def stackedbar_composition(
         color_dict (Dict[str, str], optional): A dictionary mapping categories to specific colors. If not provided,
             default colors will be used.
         ax (matplotlib.axes.Axes, optional): The axis to plot on. If not provided, a new figure and axis will be created.
-
+        order_by_similarity (bool, optional): Whether to order the bars by similarity in composition. Defaults to False.
+        similarity_metric (str, optional): The metric to use for similarity ordering. Defaults to 'correlation'.
+    
     Raises:
         ValueError: If the length of `labels` does not match the number of unique groups.
-
+    
     Examples:
         >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name')
         >>> fig, ax = plt.subplots()
         >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name', ax=ax)
     """
-    
     # Ensure the groupby column exists in .obs
     if groupby not in adata.obs.columns:
         raise ValueError(f"The groupby column '{groupby}' does not exist in the .obs attribute.")
     
-   
     # Check if groupby column is categorical or not
     if pd.api.types.is_categorical_dtype(adata.obs[groupby]):
         unique_groups = adata.obs[groupby].cat.categories.to_list()
     else:
         unique_groups = adata.obs[groupby].unique().tolist()
-
+    
     # Extract unique groups and ensure labels are provided or create default ones
-    unique_groups = adata.obs[groupby].cat.categories.to_list()
-
-
     if labels is None:
         labels = unique_groups
     elif len(labels) != len(unique_groups):
@@ -82,7 +82,7 @@ def stackedbar_composition(
     
     if color_dict is None:
         color_dict = adata.uns['SCN_class_colors'] 
-
+    
     # Extracting category proportions per group
     category_counts = []
     categories = set()
@@ -101,12 +101,21 @@ def stackedbar_composition(
             j = categories.index(category)
             proportions[j, i] = counts[category]
     
+    # Ordering groups by similarity if requested
+    if order_by_similarity:
+        dist_matrix = pdist(proportions.T, metric=similarity_metric)
+        linkage_matrix = linkage(dist_matrix, method='average')
+        order = leaves_list(linkage_matrix)
+        proportions = proportions[:, order]
+        unique_groups = [unique_groups[i] for i in order]
+        labels = [labels[i] for i in order]
+    
     # Plotting
     if ax is None:
         fig, ax = plt.subplots()
     else:
         fig = ax.figure
-
+    
     bottom = np.zeros(len(unique_groups))
     for i, category in enumerate(categories):
         color = color_dict[category] if color_dict and category in color_dict else None
@@ -135,7 +144,9 @@ def stackedbar_composition(
         return ax
 
 
-def stackedbar_composition2(
+
+
+def stackedbar_composition_old(
     adata: AnnData, 
     groupby: str, 
     obs_column = 'SCN_class', 
@@ -332,25 +343,28 @@ def stackedbar_categories(
     adata: AnnData,
     scn_classes_to_display = None, 
     bar_height=0.8,
-    color_dict = None
+    color_dict = None,
+    class_col_name = 'SCN_class_argmax',
+    category_col_name = 'SCN_class_type'
 ):
     # Copy the obs DataFrame to avoid modifying the original data
     df = adata.obs.copy()
     
     # Ensure the columns 'SCN_class' and 'SCN_class_type' exist
-    if 'SCN_class' not in df.columns or 'SCN_class_type' not in df.columns:
-        raise KeyError("Columns 'SCN_class' and 'SCN_class_type' must be present in adata.obs")
+    # if 'SCN_class' not in df.columns or 'SCN_class_type' not in df.columns:
+    if class_col_name not in df.columns or category_col_name not in df.columns:
+        raise KeyError(f"Columns '{class_col_name}' and '{category_col_name}' must be present in adata.obs")
     
     # Ensure SCN_class categories are consistent
-    df['SCN_class'] = df['SCN_class'].astype('category')
-    df['SCN_class_type'] = df['SCN_class_type'].astype('category')
+    df[class_col_name] = df[class_col_name].astype('category')
+    df[category_col_name] = df[category_col_name].astype('category')
 
-    df['SCN_class'] = df['SCN_class'].cat.set_categories(df['SCN_class'].cat.categories)
-    df['SCN_class_type'] = df['SCN_class_type'].cat.set_categories(df['SCN_class_type'].cat.categories)
+    df[class_col_name] = df[class_col_name].cat.set_categories(df[class_col_name].cat.categories)
+    df[category_col_name] = df[category_col_name].cat.set_categories(df[category_col_name].cat.categories)
 
     # Group by 'SCN_class' and get value counts for 'SCN_class_type'
     try:
-        counts = df.groupby('SCN_class')['SCN_class_type'].value_counts().unstack().fillna(0)
+        counts = df.groupby(class_col_name)[category_col_name].value_counts().unstack().fillna(0)
     except Exception as e:
         print("Error during groupby and value_counts operations:", e)
         return
@@ -362,7 +376,7 @@ def stackedbar_categories(
     total_counts = counts.sum(axis=1)
     total_percent = (total_counts / total_counts.sum() * 100).round(1)  # Converts to percentage and round
 
-    all_classes = df['SCN_class'].unique()
+    all_classes = df[class_col_name].unique()
     if scn_classes_to_display is not None:
         if not all(cls in all_classes for cls in scn_classes_to_display):
             raise ValueError("Some values in 'scn_classes_to_display' do not match available 'SCN_class' values in the provided DataFrames.")
@@ -412,8 +426,6 @@ def stackedbar_categories(
     
     ### return plt
     return fig
-
-
 
 
 
@@ -505,8 +517,6 @@ def stackedbar_categories_list_old(
     return fig
     
 
-
-
 def stackedbar_categories_list(
     ads, 
     titles=None,
@@ -590,8 +600,6 @@ def stackedbar_categories_list(
     fig.legend(handles=legend_handles, loc="outside right upper", frameon=False)
 
     return fig
-
-
 
 
 

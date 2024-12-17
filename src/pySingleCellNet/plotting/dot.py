@@ -23,6 +23,51 @@ from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
 from ..utils import *
 
+def umi_counts_ranked(adata, total_counts_column="total_counts"):
+    """
+    Identifies and plors the knee point of the UMI count distribution in an AnnData object.
+
+    Parameters:
+        adata (AnnData): The input AnnData object.
+        total_counts_column (str): Column in `adata.obs` containing total UMI counts. Default is "total_counts".
+        show (bool): If True, displays a log-log plot with the knee point. Default is True.
+
+    Returns:
+        float: The UMI count value at the knee point.
+    """
+    # Extract total UMI counts
+    umi_counts = adata.obs[total_counts_column]
+    
+    # Sort UMI counts in descending order
+    sorted_umi_counts = np.sort(umi_counts)[::-1]
+    
+    # Compute cumulative UMI counts (normalized to a fraction)
+    cumulative_counts = np.cumsum(sorted_umi_counts)
+    cumulative_fraction = cumulative_counts / cumulative_counts[-1]
+    
+    # Compute derivatives to identify the knee point
+    first_derivative = np.gradient(cumulative_fraction)
+    second_derivative = np.gradient(first_derivative)
+    
+    # Find the index of the maximum curvature (knee point)
+    knee_idx = np.argmax(second_derivative)
+    knee_point_value = sorted_umi_counts[knee_idx]
+    
+    # Generate log-log plot
+    cell_ranks = np.arange(1, len(sorted_umi_counts) + 1)
+    plt.figure(figsize=(10, 6))
+    plt.plot(cell_ranks, sorted_umi_counts, marker='o', markersize=2, linestyle='-', linewidth=0.5, label="UMI Counts")
+    plt.axvline(cell_ranks[knee_idx], color="red", linestyle="--", label=f"Knee Point: {knee_point_value}")
+    plt.title('UMI Counts Per Cell (Log-Log Scale)', fontsize=14)
+    plt.xlabel('Cell Rank (Descending)', fontsize=12)
+    plt.ylabel('Total UMI Counts', fontsize=12)
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.grid(True, linestyle='--', linewidth=0.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+    
 
 def ontogeny_graph(gra, color_dict): 
     ig.config['plotting.backend'] = 'matplotlib'
@@ -34,7 +79,8 @@ def ontogeny_graph(gra, color_dict):
     v_style["margin"] = (50)
 
     for vertex in gra.vs:
-        vertex["color"] = convert_color(color_dict.get(vertex["name"], np.array([0.5, 0.5, 0.5]))) 
+        # vertex["color"] = convert_color(color_dict.get(vertex["name"], np.array([0.5, 0.5, 0.5])))
+        vertex["color"] = tuple(color_dict.get(vertex["name"], np.array([0.5, 0.5, 0.5])))  
 
     # Normalize node sizes for better visualization
     max_size = 50  # Maximum size for visualization

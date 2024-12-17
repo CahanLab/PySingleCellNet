@@ -15,9 +15,57 @@ import anndata
 import copy
 import igraph as ig
 from collections import defaultdict
+from anndata import AnnData
 
 
-def determine_relationships(graph: ig.Graph):
+def combine_pca_scores(adata, n_pcs=50, score_key='SCN_score'):
+    """
+    Combine the top PCs and SCN scores into a new matrix in .obsm.
+    
+    Parameters:
+    -----------
+    adata : AnnData
+        AnnData object containing the PCA results and the gene set scores.
+    n_pcs : int, optional (default: 50)
+        Number of top PCs to include from .obsm['X_pca'].
+    score_key : str, optional (default: 'SCN_score')
+        Key in .obsm containing the gene set score DataFrame.
+        
+    Returns:
+    --------
+    Updates the AnnData object by adding the combined matrix to .obsm['X_pca_scores_combined'].
+    """
+    
+    # Ensure that the required data exists in .obsm
+    if 'X_pca' not in adata.obsm:
+        raise ValueError("X_pca not found in .obsm. Perform PCA before combining.")
+    
+    if score_key not in adata.obsm:
+        raise ValueError(f"{score_key} not found in .obsm. Please provide valid gene set scores.")
+    
+    # Extract the top n_pcs from .obsm['X_pca']
+    pca_matrix = adata.obsm['X_pca'][:, :n_pcs]
+    
+    # Extract the gene set scores from .obsm
+    score_matrix = adata.obsm[score_key]
+    
+    # Combine PCA matrix and score matrix horizontally (along columns)
+    combined_matrix = np.hstack([pca_matrix, score_matrix])
+    
+    # Add the combined matrix back into .obsm with a new key
+    adata.obsm['X_pca_scores_combined'] = combined_matrix
+
+    print(f"Combined matrix with {n_pcs} PCs and {score_matrix.shape[1]} gene set scores added to .obsm['X_pca_scores_combined'].")
+
+# Example usage:
+# combine_pca_scores(adata, n_pcs=30, score_key='SCN_score')
+
+
+
+
+
+
+def determine_relationships(graph: ig.Graph, GpGc = False):
     relationships = defaultdict(dict)
     for node in graph.vs:
         node_label = node['name']
@@ -36,13 +84,15 @@ def determine_relationships(graph: ig.Graph):
                     relationships[node_label][sibling] = "sibling"
                     relationships[sibling][node_label] = "sibling"  # Ensure symmetry
         # Grandparent-child relationships
-        for parent in parents:
-            grandparents = graph.neighbors(parent, mode="IN")
-            for grandparent in grandparents:
-                grandparent_label = graph.vs[grandparent]['name']
-                if grandparent_label not in relationships[node_label]:
-                    relationships[grandparent_label][node_label] = "grandparent_grandchild"
-                    relationships[node_label][grandparent_label] = "grandparent_grandchild"  # Ensure symmetry
+        if GpGc:
+            for parent in parents:
+                grandparents = graph.neighbors(parent, mode="IN")
+                for grandparent in grandparents:
+                    grandparent_label = graph.vs[grandparent]['name']
+                    if grandparent_label not in relationships[node_label]:
+                        relationships[grandparent_label][node_label] = "grandparent_grandchild"
+                        relationships[node_label][grandparent_label] = "grandparent_grandchild"  # Ensure symmetry
+
     return dict(relationships)
 
 
@@ -492,7 +542,7 @@ def make_diff_gene_dict(
     return ans
     
 
-def class_by_threshold(adata_c: AnnData, thresholds: pd.DataFrame, relationships: dict = None, columns_to_ignore: list = ["rand"], inplace=True):
+def class_by_threshold(adata_c: AnnData, thresholds: pd.DataFrame, relationships: dict = None, columns_to_ignore: list = ["rand"], inplace=True, class_obs_name='SCN_class_argmax'):
     """
     Classify cells based on SCN scores and thresholds, and annotate hybrid cells based on lineage relationships.
     
@@ -539,22 +589,26 @@ def class_by_threshold(adata_c: AnnData, thresholds: pd.DataFrame, relationships
                                 hybrid_type = "Gp.Gc"
                 class_type.iloc[idx] = hybrid_type
     else:
-        class_type.loc[hybrids] = "Hybrid"
+        class_type.loc[hybrids] = "Mix"
 
     ans = ['_'.join(lst) for lst in result_list]
     ans = [i if len(i) != 0 else "None" for i in ans]
 
-    if inplace:
-        adata_c.obs['SCN_class_emp'] = ans.copy()
-        adata_c.obs['SCN_class_type'] = class_type.copy()
+    adata_c.obs['SCN_class_emp'] = ans.copy()
+    adata_c.obs['SCN_class_type'] = class_type.copy()
+    # deal with cells classified as 'rand'
+    adata_c.obs['SCN_class_emp'] = adata_c.obs.apply(lambda row: 'Rand' if row[class_obs_name] == 'rand' else row['SCN_class_emp'], axis=1)
+    adata_c.obs['SCN_class_type'] = adata_c.obs.apply( lambda row: 'Rand' if row[class_obs_name] == 'rand' else row['SCN_class_type'], axis=1 )
+
+    # adata_c.obs['SCN_class_emp'] = adata_c.obs.apply( lambda row: 'Rand' if row['SCN_class'] == 'rand', axis=1 )
+    # adata_c.obs['SCN_class_type'] = adata_c.obs.apply( lambda row: 'Rand' if row['SCN_class'] == 'rand', axis=1 )
+
+    if inplace:        
         return None
     else:
-        adata_c.obs['SCN_class_emp'] = ans.copy()
-        adata_c.obs['SCN_class_type'] = class_type.copy()
         return adata_c
 
-
-
+    
 
 # 06-24-24 PC
 # Deprecate this func
@@ -700,7 +754,7 @@ def graph_from_data_frame(Net, edge_dataframe, node_dataframe, attribution_colum
     return Net
 
 
-def comp_ct_thresh(adata_c: AnnData, qTile: int = 0.05) -> pd.DataFrame:
+def comp_ct_thresh(adata_c: AnnData, qTile: int = 0.05, obs_name = 'SCN_class_argmax') -> pd.DataFrame:
 
     # check whether .obsm['SCN_score'] has been defined
     if "SCN_score" not in adata_c.obsm_keys():
@@ -721,7 +775,7 @@ def comp_ct_thresh(adata_c: AnnData, qTile: int = 0.05) -> pd.DataFrame:
 
         for ct in cts:
             print(ct)
-            templocs = sampTab[sampTab.SCN_class == ct].index
+            templocs = sampTab[sampTab[obs_name] == ct].index
             tempscores = scnScores.loc[templocs, ct]
             thrs.loc[[ct], [0]] = np.quantile(tempscores, q = qTile)
     

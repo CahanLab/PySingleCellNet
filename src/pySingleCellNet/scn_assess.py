@@ -6,6 +6,42 @@ from .stats import *
 from .scn_train import *
 import matplotlib
 import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report
+from anndata import AnnData
+
+
+def create_classifier_report(adata: AnnData,
+    ground_truth: str,
+    prediction: str) -> pd.DataFrame:
+
+    report = classification_report(adata.obs[ground_truth], adata.obs[prediction],labels=adata.obs[ground_truth].cat.categories, output_dict = True)
+    # Parse the sklearn classification report into a DataFrame
+    if isinstance(report, str):
+        lines = report.split('\n')
+        rows = []
+        for line in lines[2:]:
+            if line.strip() == '':
+                continue
+            row = line.split()
+            if row[0] == 'micro' or row[0] == 'macro' or row[0] == 'weighted':
+                row[0] = ' '.join(row[:2])
+                row = [row[0]] + row[2:]
+            elif len(row) > 5:
+                row[0] = ' '.join(row[:2])
+                row = [row[0]] + row[2:]
+            rows.append(row)
+        
+        df = pd.DataFrame(rows, columns=["Label", "Precision", "Recall", "F1-Score", "Support"])
+        df["Precision"] = pd.to_numeric(df["Precision"], errors='coerce')
+        df["Recall"] = pd.to_numeric(df["Recall"], errors='coerce')
+        df["F1-Score"] = pd.to_numeric(df["F1-Score"], errors='coerce')
+        df["Support"] = pd.to_numeric(df["Support"], errors='coerce')
+    elif isinstance(report, dict):
+        df = pd.DataFrame(report).T.reset_index()
+        df.columns = ["Label", "Precision", "Recall", "F1-Score", "Support"]
+    else:
+        raise ValueError("Report must be a string or a dictionary.")
+    return df
 
 
 def divide_sampTab(sampTab, prop, dLevel="cell_ontology_class"):

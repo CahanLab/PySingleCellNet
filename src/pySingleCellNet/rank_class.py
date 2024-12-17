@@ -7,6 +7,8 @@ from scipy.sparse import csr_matrix
 from scipy.sparse import issparse
 from scipy.stats import rankdata
 from sklearn.decomposition import FastICA
+from anndata import AnnData
+
 from .utils import *
 
 def train_rank_classifier(adata, dLevel, nRand: int = 200, n_trees = 1000):

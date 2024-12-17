@@ -5,10 +5,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
-import umap
 import anndata as ad
-import igraph as ig
-# from igraph import Graph
 from palettable.colorbrewer.qualitative import Set2_6
 from palettable.tableau import GreenOrange_6
 from palettable.cartocolors.qualitative import Safe_6
@@ -20,8 +17,50 @@ from palettable.scientific.sequential import LaJolla_20
 from palettable.scientific.sequential import Batlow_20
 from anndata import AnnData
 from scipy.sparse import csr_matrix
-from sklearn.metrics import f1_score
 from ..utils import *
+import marsilea as ml
+import marsilea.plotter as mp
+from sklearn.metrics import classification_report
+from matplotlib.colors import LinearSegmentedColormap
+
+
+def heatmap_classifier_report(df: pd.DataFrame,
+    width=2.5,
+    height=7):
+
+    # Separate the special averages from the rest of the labels
+    special_averages = df[df['Label'].isin(['micro avg', 'macro avg', 'weighted avg'])]
+    non_avg_df = df[~df['Label'].isin(['micro avg', 'macro avg', 'weighted avg'])]
+    row_names = mp.Labels(df['Label'], align="right")
+    row_types = ["class"] * non_avg_df.shape[0] + ["avg"] * special_averages.shape[0]
+    col_names = mp.Labels(["Precision", "Recall", "F1-Score"], align="center")
+    
+     # Create custom colormap
+    colors = [(0, "#add8e6"), (0.8, "#ffffff"), (0.81, "#ffcccc"), (1, "#ff0000")]
+    cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
+    # Create Marsilea plot
+    support_count = mp.Numbers(df["Support"], color="#fac858", label="support")
+    
+    # Combine non-average rows and special averages
+    combined_df = pd.concat([non_avg_df, special_averages])
+    metrics = ["Precision", "Recall", "F1-Score"]
+    heatmap_data = combined_df.set_index("Label")[metrics]
+    h = ml.Heatmap(heatmap_data, cmap = cmap, annot=True, width=width, height=height)
+    
+    # Group the rows to separate special averages
+    h.group_rows(row_types, order=["class","avg"])
+    # h.group_rows(list(special_averages.index), label="Averages", color="#add8e6", pad=0.1)
+    
+    # Add bar chart for support values
+    h.add_right(support_count, pad=0.1, size=0.5)
+    
+    # Add labels
+    h.add_left(row_names, pad=0.02)
+    h.add_top(col_names, pad=0.03)
+    h.add_legends("right", align_stacks="center", align_legends="top", pad=0.2)
+    # Set margins and render the plot
+    h.set_margin(0.5)
+    h.render()
 
 
 def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1, obsm_name='SCN_score', order_by: str = None):
@@ -74,6 +113,58 @@ def heatmap_gsea(
     label_font_size = 7,
     cbar_pos = [0.07, .3, .02, .4],
     dendro_ratio = (0.3, 0.1),
+    cbar_title='NES' ,
+    col_cluster=False,
+    row_cluster=False,
+):
+    
+    gsea_matrix = gmat.copy()
+    if clean_cells:
+        gsea_matrix = gsea_matrix.loc[:,gsea_matrix.sum(0) != 0]
+
+    if clean_signatures:
+        gsea_matrix = gsea_matrix.loc[gsea_matrix.sum(1) != 0,:]
+
+    # should add a check on matrix dims, and print message a dim is 0
+    ax = sns.clustermap(data=gsea_matrix, cmap=Roma_20.mpl_colormap.reversed(), center=0,
+        yticklabels=1, xticklabels=1, linewidth=.05, linecolor='white',
+        method='average', metric='euclidean', dendrogram_ratio=dendro_ratio,
+        col_colors= column_colors, figsize=figsize, row_cluster=row_cluster, col_cluster=col_cluster)
+    # put gene set labels on left side, and right justify them <- does not work well    
+    # ax.ax_heatmap.yaxis.tick_left()
+    # ax.ax_heatmap.yaxis.set_label_position("left")
+    # for label in ax.ax_heatmap.get_yticklabels():
+    #     label.set_horizontalalignment('right')
+
+    # uncomment the following 2 lines to put x-axis labels at top of heatmap
+    # Let the horizontal axes labeling appear on top.
+    # ax.tick_params(top=True, bottom=False,
+    #               labeltop=True, labelbottom=False)
+
+    ax.ax_cbar.set_axis_off()
+    ax.figure.tight_layout(h_pad=.05, w_pad=0.02, rect=[0, 0, 1, 1])
+    ax.ax_cbar.set_axis_on()
+    # ax.ax_cbar.set_position((0.02, 0.8, 0.05, 0.18))
+
+    ax.ax_cbar.set_position(cbar_pos)
+    ax.ax_cbar.yaxis.tick_left()
+    ax.ax_cbar.set_title(cbar_title, fontsize=label_font_size)
+    ax.ax_cbar.tick_params(labelsize=label_font_size) # set_ylabel(size = label_font_size)
+    
+    ax.ax_row_dendrogram.set_visible(False)
+    ax.ax_heatmap.set_yticklabels(ax.ax_heatmap.get_ymajorticklabels(), fontsize = label_font_size)
+    ax.ax_heatmap.set_xticklabels(ax.ax_heatmap.get_xmajorticklabels(), rotation=45, ha="right", rotation_mode="anchor", fontsize = label_font_size)
+    plt.show()
+
+def heatmap_gsea_old(
+    gmat,
+    clean_signatures = False,
+    clean_cells = False,
+    column_colors = None,
+    figsize=(8,6),
+    label_font_size = 7,
+    cbar_pos = [0.07, .3, .02, .4],
+    dendro_ratio = (0.3, 0.1),
     cbar_title='NES' 
 ):
     
@@ -114,6 +205,7 @@ def heatmap_gsea(
     ax.ax_heatmap.set_yticklabels(ax.ax_heatmap.get_ymajorticklabels(), fontsize = label_font_size)
     ax.ax_heatmap.set_xticklabels(ax.ax_heatmap.get_xmajorticklabels(), rotation=45, ha="right", rotation_mode="anchor", fontsize = label_font_size)
     plt.show()
+
 
 
 

@@ -12,6 +12,33 @@ import matplotlib.pyplot as plt
 from alive_progress import alive_bar
 from .utils import *
 from .tsp_rf import *
+from .scn_assess import create_classifier_report
+
+def train_and_assess(
+    adata,
+    groupby,
+    ncells = 250,
+    nTopGenes = 30,
+    nTopGenePairs = 40,
+    nTrees = 1000,
+    propOther = 0.25,
+    obs_pred = 'SCN_class_argmax',
+    return_clf = False,
+    layer = 'lognorm'
+):
+    nRand = ncells
+    tids, vids = split_adata_indices(adata, ncells, dLevel=groupby, cellid=None, strata_col="stage")
+    adTrain = adata[tids].copy()
+    # train
+    clf = train_classifier(adTrain, dLevel = groupby, nTopGenes = nTopGenes, nTopGenePairs = nTopGenePairs, nRand = nRand, nTrees = nTrees, layer=layer, propOther=propOther)
+    # assess
+    adHeldOut = adata[vids].copy()
+    scn_classify(adHeldOut, clf, nrand = 0)
+    c_report = create_classifier_report(adHeldOut, ground_truth=groupby, prediction=obs_pred)
+    if return_clf:
+        return c_report, clf
+    else:
+        return c_report
 
 
 def randomize(expDat: pd.DataFrame, num: int = 50) -> pd.DataFrame:
@@ -118,7 +145,7 @@ def scn_classify(adata: AnnData, rf_tsp, nrand: int = 0):
     possible_classes = pd.Categorical(classRes.columns)
     # Add a new column to `obs` for the predicted cell types
     predicted_classes = classRes.idxmax(axis=1)
-    adata.obs['SCN_class'] = pd.Categorical(predicted_classes, categories=possible_classes, ordered=True)
+    adata.obs['SCN_class_argmax'] = pd.Categorical(predicted_classes, categories=possible_classes, ordered=True)
 
     # store this for consistent coloring
     adata.uns['SCN_class_colors'] = rf_tsp['ctColors']        
@@ -143,6 +170,71 @@ def rf_classPredict(rfObj,expQuery,numRand=50):
         expQuery = pd.concat([expQuery, randDat])
     xpreds = pd.DataFrame(rfObj.predict_proba(expQuery), columns= rfObj.classes_, index=expQuery.index)
     return xpreds
+
+
+# assumses that the data are normalized, and HVG defined
+def train_classifier(aTrain,
+    dLevel,
+    nRand = None,
+    cell_type_to_color = None,
+    nTopGenes = 20,
+    nTopGenePairs = 20,
+    nTrees = 1000,
+    propOther=0.5,
+    layer = None
+#   assumes that .var['highly_variable'] is set
+#   assumes that log lib size scaled normalization has been performed (but not gene scaling)
+):
+    progress_total = 5
+    with alive_bar(progress_total, title="Training classifier") as bar:
+        warnings.filterwarnings('ignore')
+
+        # auto determine nRand = mean number of cells per type
+        if nRand is None:
+            nRand = np.floor(np.mean(aTrain.obs[dLevel].value_counts()))
+
+        stTrain= aTrain.obs
+        expRaw = aTrain.to_df()
+        expRaw = expRaw.loc[stTrain.index.values]
+        adNorm = aTrain.copy()
+        # cluster for comparison to closest celltype neighbors
+        
+        sc.pp.pca(adNorm, n_comps=50, mask_var='highly_variable')
+        sc.tl.dendrogram(adNorm, groupby=dLevel, linkage_method='average', use_rep = 'X_pca', n_pcs = 30) # note that res here might not be what the user intends
+        sc.tl.rank_genes_groups(adNorm, use_raw=False, layer=layer, groupby=dLevel, mask_var='highly_variable', key_added=SCN_DIFFEXP_KEY, pts=True)
+
+        expTnorm = adNorm.to_df()
+        expTnorm = expTnorm.loc[stTrain.index.values]
+        bar() # Bar 1
+        # cgenesA, grps, cgenes_list = get_classy_genes(adNorm, dLevel = dLevel, key_name = SCN_DIFFEXP_KEY, topX = nTopGenes)
+        cgenesA, grps, cgenes_list = get_classy_genes_2(adNorm, groupby= dLevel, key_name = SCN_DIFFEXP_KEY, topX_per_diff_type = nTopGenes, layer = layer)
+        bar() # Bar 2
+        xpairs = ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000, propOther=propOther)
+        bar() # Bar 3
+        pdTrain = query_transform(expRaw.loc[:,cgenesA], xpairs)
+
+        tspRF = sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees)
+        bar() # Bar 4
+    
+        ## set celltype colors
+        ## Do this here because we add a 'rand' celltype
+        
+        # Need to add checks that all classes have a color if ct_colors is provided
+        if cell_type_to_color is None:
+            ## assume this is a Series
+            cell_types = stTrain[dLevel].cat.categories.to_list()
+            cell_types.append('rand')
+            unique_colors = get_unique_colors(len(cell_types))
+            cell_type_to_color = {cell_type: color for cell_type, color in zip(cell_types, unique_colors)}
+        bar() # Bar 5
+
+        argList = {'nRand': nRand, 'nTopGenes': nTopGenes, 'nTopGenePairs': nTopGenePairs, 'nTrees': nTrees, 'propOther': propOther}
+
+    return {'tpGeneArray': cgenesA, 'topPairs':xpairs, 'classifier': tspRF, 'diffExpGenes':cgenes_list, 'ctColors':cell_type_to_color, 'argList': argList}
+
+
+
+
 
 def scn_train(aTrain,
     dLevel,
@@ -238,6 +330,7 @@ def check_adX(adata: AnnData) -> AnnData:
     if( isinstance(adata.X, np.ndarray)):
         adata.X = sparse.csr_matrix(adata.X)
 
+# I don't think that this is called anywhere
 def add_classRes(adata: AnnData, adClassRes, copy=False) -> AnnData:
     cNames = adClassRes.var_names
     for cname in cNames:

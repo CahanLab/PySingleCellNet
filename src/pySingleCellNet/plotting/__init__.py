@@ -7,6 +7,7 @@ from .bar import (
 )
 
 from .dot import (
+    umi_counts_ranked,
     ontogeny_graph,
     dotplot_deg,
     dotplot_diff_gene,
@@ -15,6 +16,7 @@ from .dot import (
 )
 
 from .heatmap import (
+    heatmap_classifier_report,
     heatmap_scores,
     heatmap_gsea,
     heatmap_genes,
@@ -31,11 +33,13 @@ __all__ = [
     "stackedbar_categories",
     "stackedbar_categories_list",
     "bar_classifier_f1",
+    "umi_counts_ranked",
     "ontogeny_graph",
     "dotplot_deg",
     "dotplot_diff_gene",
     "dotplot_scn_scores",
     "umap_scores",
+    "heatmap_classifier_report",
     "heatmap_scores",
     "heatmap_gsea",
     "heatmap_genes",
