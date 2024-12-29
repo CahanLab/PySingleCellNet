@@ -8,6 +8,263 @@ import anndata as ad
 from scipy.sparse import issparse
 # import re
 from alive_progress import alive_bar
+import string
+
+
+
+def rename_cluster_labels(
+    adata: AnnData,
+    old_col: str = "cluster",
+    new_col: str = "short_cluster"
+) -> None:
+    """
+    Renames cluster labels in the specified .obs column with multi-letter codes.
+    
+    - All unique labels (including NaN) are mapped in order of appearance to 
+      a base-26 style ID: 'A', 'B', ..., 'Z', 'AA', 'AB', etc.
+    - The new labels are stored as a categorical column in `adata.obs[new_col]`.
+    
+    Args:
+        adata (AnnData):
+            The AnnData object containing the cluster labels.
+        old_col (str, optional):
+            The name of the .obs column that has the original cluster labels.
+            Defaults to "cluster".
+        new_col (str, optional):
+            The name of the new .obs column that will store the shortened labels.
+            Defaults to "short_cluster".
+    
+    Returns:
+        None: The function adds a new column to `adata.obs` in place.
+    """
+    
+    # 1. Extract unique labels (including NaN), in the order they appear
+    unique_labels = adata.obs[old_col].unique()
+    
+    # 2. Helper function for base-26 labeling
+    def index_to_label(idx: int) -> str:
+        """
+        Convert a zero-based index to a base-26 letter code:
+        0 -> A
+        1 -> B
+        ...
+        25 -> Z
+        26 -> AA
+        27 -> AB
+        ...
+        """
+        letters = []
+        while True:
+            remainder = idx % 26
+            letter = chr(ord('A') + remainder)
+            letters.append(letter)
+            idx = idx // 26 - 1
+            if idx < 0:
+                break
+        return ''.join(letters[::-1])
+    
+    # 3. Build the mapping (including NaN -> next code)
+    label_map = {}
+    for i, lbl in enumerate(unique_labels):
+        label_map[lbl] = index_to_label(i)
+    
+    # 4. Apply the mapping to create the new column
+    adata.obs[new_col] = adata.obs[old_col].map(label_map)
+    adata.obs[new_col] = adata.obs[new_col].astype("category")
+
+
+
+def assign_optimal_cluster(adata, cluster_reports, new_col="optimal_cluster"):
+    """
+    Determine the optimal cluster label per cell across multiple cluster assignments
+    by comparing F1-scores, then prepend the chosen label with the name of the .obs
+    column that provided it.
+    
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        The annotated single-cell dataset.
+    cluster_reports : dict[str, pd.DataFrame]
+        A dictionary where keys are column names in `adata.obs` (each key 
+        corresponds to one clustering scheme), and values are DataFrames 
+        with classification metrics including 'Label' and 'F1-Score'.
+    new_col : str, optional
+        The name of the new `.obs` column in which the optimal cluster labels 
+        will be stored. Default is "optimal_cluster".
+    
+    Returns
+    -------
+    None
+        The function adds a new column to `adata.obs` but does not return anything.
+    """
+    # Prepare a list to hold the chosen cluster label (prepended with obs_col name) per cell
+    optimal_labels = np.empty(adata.n_obs, dtype=object)
+    
+    # Convert each cluster report into a dictionary for faster F1 lookups:
+    # For each clustering key, map cluster_label -> F1_score
+    f1_lookup_dict = {}
+    for obs_col, df in cluster_reports.items():
+        # Convert the "Label" -> "F1-Score" DataFrame to a dictionary for quick lookups
+        f1_lookup_dict[obs_col] = dict(zip(df["Label"], df["F1-Score"]))
+    
+    # Iterate over each cell in adata
+    for i in range(adata.n_obs):
+        best_f1 = -1
+        best_label_full = None  # Will store "<obs_col>_<cluster_label>"
+        
+        # Check each cluster assignment
+        for obs_col, label_to_f1 in f1_lookup_dict.items():
+            # Current cell's cluster label in this assignment
+            cell_label = adata.obs[obs_col].iloc[i]
+            # Lookup F1 score (if label doesn't exist in the classification report, default to -1)
+            f1 = label_to_f1.get(cell_label, -1)
+            # Update if this is a higher F1
+            if f1 > best_f1:
+                best_f1 = f1
+                # Prepend the obs_col to ensure uniqueness across different clustering schemes
+                best_label_full = f"{obs_col}_{cell_label}"
+            
+        optimal_labels[i] = best_label_full
+    
+    # Store the new labels in an adata.obs column
+    adata.obs[new_col] = optimal_labels
+
+
+def reassign_selected_clusters(
+    adata,
+    dendro_key,
+    current_label,
+    new_label,
+    clusters_to_clean=None
+):
+    """
+    Reassign cells whose cluster is in `clusters_to_clean` by picking the 
+    highest-correlation cluster from the dendrogram correlation matrix.
+
+    We fix Scanpy's default behavior where:
+      - 'categories_ordered' (leaf order) != the row order in 'correlation_matrix'.
+      - Instead, 'categories_idx_ordered' is the permutation that maps leaf positions 
+        to row indices in the original correlation matrix.
+    
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Must contain:
+          - adata.obs[current_label]: the current cluster assignments (strings).
+          - adata.uns[dendro_key]: a dict with:
+             * "categories_ordered": list of cluster labels in dendrogram (leaf) order
+             * "categories_idx_ordered": list of row indices corresponding to the above
+             * "correlation_matrix": the NxN matrix of correlations in the original order
+    dendro_key : str
+        Key in adata.uns that has the dendrogram data.
+    current_label : str
+        Column in adata.obs containing the current cluster assignments.
+    new_label : str
+        Column name in adata.obs where we store the reassigned clusters.
+    clusters_to_clean : list or set of str, optional
+        Labels that should be reassigned. If None, nothing will be cleaned.
+    
+    Returns
+    -------
+    None
+        Adds a new column `adata.obs[new_label]` with updated assignments.
+    """
+    
+    if clusters_to_clean is None:
+        clusters_to_clean = []
+    clusters_to_clean_set = set(clusters_to_clean)
+    
+    # Ensure the column is string (not categorical) to avoid assignment issues
+    if pd.api.types.is_categorical_dtype(adata.obs[current_label]):
+        adata.obs[current_label] = adata.obs[current_label].astype(str)
+    
+    # Pull out original assignments
+    original_assignments = adata.obs[current_label].values
+    new_assignments = original_assignments.copy()
+    
+    # Retrieve dendrogram data
+    if dendro_key not in adata.uns:
+        raise KeyError(f"{dendro_key} not found in adata.uns.")
+    dendro_data = adata.uns[dendro_key]
+    
+    categories_ordered = dendro_data.get("categories_ordered", None)      # Leaf labels
+    leaves = dendro_data.get("categories_idx_ordered", None)             # Leaf indices
+    corr_matrix = dendro_data.get("correlation_matrix", None)
+    
+    if (categories_ordered is None or leaves is None or corr_matrix is None):
+        raise ValueError(
+            f"adata.uns['{dendro_key}'] must contain "
+            "'categories_ordered', 'categories_idx_ordered', and 'correlation_matrix'."
+        )
+    
+    n_cats = len(categories_ordered)
+    if n_cats != len(leaves):
+        raise ValueError("Mismatch: categories_ordered and categories_idx_ordered differ in length.")
+    if corr_matrix.shape != (n_cats, n_cats):
+        raise ValueError("Mismatch: correlation_matrix shape does not match number of categories.")
+    
+    # --------------------------------------------------------
+    # 1) Reconstruct the "original" category order used in corr_matrix
+    #    Because Scanpy does not reorder corr_matrix to the dendrogram's leaf order;
+    #    instead it stores the "dendrogram order" in leaves + categories_ordered.
+    #
+    #    categories_ordered[i] = label at leaf i
+    #    leaves[i] = index in the original order for that leaf
+    #
+    #    So if leaves = [2, 0, 1], it means:
+    #      - leaf 0 is originally row 2,
+    #      - leaf 1 is originally row 0,
+    #      - leaf 2 is originally row 1.
+    #
+    #    We'll invert that so original_categories[row_idx] = label for that row.
+    # --------------------------------------------------------
+    original_categories = [None]*n_cats
+    for leaf_pos, row_idx in enumerate(leaves):
+        # categories_ordered[leaf_pos] is the label at leaf_pos
+        label = categories_ordered[leaf_pos]
+        original_categories[row_idx] = label
+    
+    # Build a lookup from label -> row index in corr_matrix
+    label_to_idx = {lbl: i for i, lbl in enumerate(original_categories)}
+    
+    def find_closest_cluster(label):
+        """
+        Return the label whose correlation is highest with `label`, 
+        skipping the label itself and any in clusters_to_clean_set.
+                
+        'corr_matrix' is in the "original" order, 
+        so we find its row via 'label_to_idx[label]'.
+        """
+        if label not in label_to_idx:
+            return None  # no data for this label
+        row_idx = label_to_idx[label]
+        row = corr_matrix[row_idx]
+        
+        # Sort indices by descending correlation
+        sorted_idx = np.argsort(row)[::-1]  # highest corr first
+        
+        for idx_ in sorted_idx:
+            # skip itself
+            if idx_ == row_idx:
+                continue
+            candidate_label = original_categories[idx_]
+            if candidate_label in clusters_to_clean_set:
+                continue  # skip "clean" labels
+            return candidate_label
+        return None
+    
+    # Reassign if needed
+    for i in range(len(new_assignments)):
+        c_label = new_assignments[i]
+        if c_label in clusters_to_clean_set:
+            fallback = find_closest_cluster(c_label)
+            if fallback is not None:
+                new_assignments[i] = fallback
+            # else remain in the same cluster
+    
+    adata.obs[new_label] = new_assignments
+    # make sure type is category, seems to be needed for sc.tl.dendrogram
+    adata.obs[new_label] = adata.obs[new_labe].astype('category')
 
 
 def rank_genes_subsets(
@@ -15,6 +272,7 @@ def rank_genes_subsets(
     groupby,
     grpA,
     grpB,
+    pval = 0.01,
     layer=None
 ):
     """
@@ -46,7 +304,7 @@ def rank_genes_subsets(
         use_raw=False
     )
     # return subset
-    ans = sc.get.rank_genes_groups_df(subset, group='grpA', pval_cutoff=0.01)
+    ans = sc.get.rank_genes_groups_df(subset, group='grpA', pval_cutoff=pval)
     return ans
 
 
@@ -115,7 +373,7 @@ def split_adata_indices(adata, ncells, dLevel="cell_ontology_class", cellid=None
     trainingids = []
 
     for ct in cts:
-        print(ct, ": ")
+        # print(ct, ": ")
         subset = adata[adata.obs[dLevel] == ct]
 
         if strata_col:
@@ -135,7 +393,7 @@ def split_adata_indices(adata, ncells, dLevel="cell_ontology_class", cellid=None
             sampled_ids = np.random.choice(subset.obs[cellid].values, ccount, replace=False)
             trainingids.extend(sampled_ids)
 
-        print(subset.n_obs)
+        # print(subset.n_obs)
 
     # Get all unique IDs
     all_ids = adata.obs[cellid].values
@@ -716,10 +974,10 @@ def splitCommon(expData, ncells,sampTab, dLevel="cell_ontology_class", cells_res
     trainingids = np.empty(0)
     for ct in cts:
         aX = expData.loc[sampTab[dLevel] == ct, :]
-        print(ct, ": ")
+        # print(ct, ": ")
         ccount = len(aX.index) - cells_reserved
         ccount = min([ccount, ncells])
-        print(ccount)
+        # print(ccount)
         trainingids = np.append(trainingids, np.random.choice(aX.index.values, ccount, replace = False))
     val_ids = np.setdiff1d(sampTab.index, trainingids, assume_unique = True)
     aTrain = expData.loc[np.isin(sampTab.index.values, trainingids, assume_unique = True),:]

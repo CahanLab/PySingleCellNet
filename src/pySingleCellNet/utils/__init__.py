@@ -1,6 +1,7 @@
 from .qc import (
     find_knee_point,
-    mito_rib
+    mito_rib,
+    mito_rib_heme
 )
 
 from .adataTools import (
@@ -16,7 +17,10 @@ from .adataTools import (
     find_elbow,
     convert_diffExp_to_dict,
     rank_genes_subsets,
-    build_knn_graph
+    build_knn_graph,
+    assign_optimal_cluster,
+    rename_cluster_labels,
+    reassign_selected_clusters
 )
 
 from .annotation import (
@@ -41,6 +45,7 @@ from .colors import (
 __all__ = [
     "find_knee_point",
     "mito_rib",
+    "mito_rib_heme",
     "limit_anndata_to_common_genes",
     "split_common_anndata",
     "split_adata_indices",
@@ -62,6 +67,9 @@ __all__ = [
     "norm_hvg_scale_pca_oct",
     "get_unique_colors",
     "rank_genes_subsets",
-    "build_knn_graph"
+    "build_knn_graph",
+    "assign_optimal_cluster",
+    "rename_cluster_labels",
+    "reassign_selected_clusters"
 ]
 

@@ -24,13 +24,15 @@ def train_and_assess(
     propOther = 0.25,
     obs_pred = 'SCN_class_argmax',
     return_clf = False,
-    layer = 'lognorm'
+    layer = 'lognorm',
+    strata_col = 'stage',
+    n_comps = 50
 ):
     nRand = ncells
-    tids, vids = split_adata_indices(adata, ncells, dLevel=groupby, cellid=None, strata_col="stage")
+    tids, vids = split_adata_indices(adata, ncells, dLevel=groupby, cellid=None, strata_col=strata_col)
     adTrain = adata[tids].copy()
     # train
-    clf = train_classifier(adTrain, dLevel = groupby, nTopGenes = nTopGenes, nTopGenePairs = nTopGenePairs, nRand = nRand, nTrees = nTrees, layer=layer, propOther=propOther)
+    clf = train_classifier(adTrain, dLevel = groupby, nTopGenes = nTopGenes, nTopGenePairs = nTopGenePairs, nRand = nRand, nTrees = nTrees, layer=layer, propOther=propOther, n_comps = n_comps)
     # assess
     adHeldOut = adata[vids].copy()
     scn_classify(adHeldOut, clf, nrand = 0)
@@ -113,7 +115,7 @@ def sc_makeClassifier(
     ## #### ## return [expT.loc[:, ggenes], ggroups]
     return clf
 
-def scn_classify(adata: AnnData, rf_tsp, nrand: int = 0):
+def classify_anndata(adata: AnnData, rf_tsp, nrand: int = 0):
     """
     Classifies cells in the `adata` object based on the given gene expression and cross-pair information using a
     random forest classifier in rf_tsp trained with the provided xpairs genes.
@@ -181,7 +183,8 @@ def train_classifier(aTrain,
     nTopGenePairs = 20,
     nTrees = 1000,
     propOther=0.5,
-    layer = None
+    layer = None,
+    n_comps = 50
 #   assumes that .var['highly_variable'] is set
 #   assumes that log lib size scaled normalization has been performed (but not gene scaling)
 ):
@@ -193,23 +196,29 @@ def train_classifier(aTrain,
         if nRand is None:
             nRand = np.floor(np.mean(aTrain.obs[dLevel].value_counts()))
 
+        n_comps = n_comps if 0 < n_comps < min(aTrain.shape) else min(aTrain.shape) - 1
+
         stTrain= aTrain.obs
         expRaw = aTrain.to_df()
         expRaw = expRaw.loc[stTrain.index.values]
         adNorm = aTrain.copy()
         # cluster for comparison to closest celltype neighbors
+
         
-        sc.pp.pca(adNorm, n_comps=50, mask_var='highly_variable')
-        sc.tl.dendrogram(adNorm, groupby=dLevel, linkage_method='average', use_rep = 'X_pca', n_pcs = 30) # note that res here might not be what the user intends
+        sc.pp.pca(adNorm, n_comps=n_comps, mask_var='highly_variable')
+        sc.tl.dendrogram(adNorm, groupby=dLevel, linkage_method='average', use_rep = 'X_pca', n_pcs = n_comps) # note that res here might not be what the user intends
         sc.tl.rank_genes_groups(adNorm, use_raw=False, layer=layer, groupby=dLevel, mask_var='highly_variable', key_added=SCN_DIFFEXP_KEY, pts=True)
 
         expTnorm = adNorm.to_df()
         expTnorm = expTnorm.loc[stTrain.index.values]
         bar() # Bar 1
         # cgenesA, grps, cgenes_list = get_classy_genes(adNorm, dLevel = dLevel, key_name = SCN_DIFFEXP_KEY, topX = nTopGenes)
-        cgenesA, grps, cgenes_list = get_classy_genes_2(adNorm, groupby= dLevel, key_name = SCN_DIFFEXP_KEY, topX_per_diff_type = nTopGenes, layer = layer)
+        # cgenesA, grps, cgenes_list = get_classy_genes_2(adNorm, groupby= dLevel, key_name = SCN_DIFFEXP_KEY, topX_per_diff_type = nTopGenes, layer = layer)
+        topX_per_diff_type = np.ceil(nTopGenes/3)
+        cgenesA, grps, cgenes_list = get_classy_genes_3(adNorm, groupby= dLevel, key_name = SCN_DIFFEXP_KEY, topX_per_diff_type = topX_per_diff_type, layer = layer)
         bar() # Bar 2
-        xpairs = ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000, propOther=propOther)
+        ## xpairs = ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000, propOther=propOther)
+        xpairs = generate_gene_pairs(cgenes_list, npairs = nTopGenePairs )
         bar() # Bar 3
         pdTrain = query_transform(expRaw.loc[:,cgenesA], xpairs)
 

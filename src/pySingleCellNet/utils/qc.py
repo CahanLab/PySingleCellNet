@@ -38,6 +38,110 @@ def find_knee_point(adata, total_counts_column="total_counts"):
     return knee_point_value
 
 
+
+def mito_rib_heme(adQ: AnnData,
+                  species: str = "MM",
+                  clean: dict = None) -> AnnData:
+    """
+    Calculate mitochondrial, ribosomal, and hemoglobin QC metrics 
+    and add them to the `.var` attribute of the AnnData object.
+    
+    Parameters
+    ----------
+    adQ : AnnData
+        Annotated data matrix with observations (cells) and variables (features).
+    species : str, optional (default: "MM")
+        The species of the input data. Can be "MM" (Mus musculus) or "HS" (Homo sapiens).
+    clean : dict, optional (default: {'ribo': True, 'mt': True, 'heme': True})
+        Dictionary controlling whether to remove:
+          - 'ribo': ribosomal genes
+          - 'mt': mitochondrial genes
+          - 'heme': hemoglobin genes
+    
+    Returns
+    -------
+    AnnData
+        Annotated data matrix with QC metrics added to the `.var` attribute,
+        and optionally with certain gene classes removed.
+    """
+    # -------------------------
+    # 1. Set default if clean is None
+    # -------------------------
+    if clean is None:
+        clean = {'ribo': True, 'mt': True, 'heme': True}
+    else:
+        # Ensure all three keys exist; if not, set them to default True
+        for k in ['ribo', 'mt', 'heme']:
+            if k not in clean:
+                clean[k] = True
+    
+    # -------------------------
+    # 2. Copy the input data
+    # -------------------------
+    adata = adQ.copy()
+    
+    # -------------------------
+    # 3. Define gene prefixes based on species
+    # -------------------------
+    if species == 'MM':
+        # MOUSE
+        mt_prefix = "mt-"
+        ribo_prefix = ("Rps", "Rpl")
+        # Common mouse hemoglobin genes often start with 'Hba-' or 'Hbb-'
+        heme_prefix = ("Hba-", "Hbb-")
+    
+    else:
+        # HUMAN
+        mt_prefix = "MT-"
+        ribo_prefix = ("RPS", "RPL")
+        # Human hemoglobin genes typically start with 'HB...' 
+        # (HBA, HBB, HBD, HBE, HBG, HBZ, HBM, HBQ, etc.)
+        # Using just "HB" can be too broad in some annotations, 
+        # so here's a more explicit tuple:
+        heme_prefix = ("HBA", "HBB", "HBD", "HBE", "HBG", "HBZ", "HBM", "HBQ")
+    
+    # -------------------------
+    # 4. Flag MT, Ribo, and Heme genes in .var
+    # -------------------------
+    adata.var['mt'] = adata.var_names.str.startswith(mt_prefix)
+    adata.var['ribo'] = adata.var_names.str.startswith(ribo_prefix)
+    adata.var['heme'] = adata.var_names.str.startswith(heme_prefix)
+    
+    # -------------------------
+    # 5. Calculate QC metrics 
+    #    (Scanpy automatically calculates .var['total_counts'] etc.)
+    # -------------------------
+    sc.pp.calculate_qc_metrics(
+        adata,
+        qc_vars=['ribo', 'mt', 'heme'],
+        percent_top=None,
+        log1p=True,
+        inplace=True
+    )
+    
+    # -------------------------
+    # 6. Optionally remove genes
+    # -------------------------
+    remove_mask = np.zeros(adata.shape[1], dtype=bool)
+    
+    if clean['mt']:
+        remove_mask |= adata.var['mt'].values
+    if clean['ribo']:
+        remove_mask |= adata.var['ribo'].values
+    if clean['heme']:
+        remove_mask |= adata.var['heme'].values
+    
+    keep_mask = ~remove_mask
+    
+    adata = adata[:, keep_mask].copy()
+    
+    # -------------------------
+    # 7. Return the modified AnnData
+    # -------------------------
+    return adata
+
+
+
 def mito_rib(adQ: AnnData, species: str = "MM", clean: bool = True) -> AnnData:
     """
     Calculate mitochondrial and ribosomal QC metrics and add them to the `.var` attribute of the AnnData object.

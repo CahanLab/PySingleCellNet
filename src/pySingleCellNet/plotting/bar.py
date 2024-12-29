@@ -559,8 +559,8 @@ def stackedbar_categories_list(
         tmp_classes_to_display = list(classes_to_display)  # Copy to prevent mutation
         
         # Ensure SCN_class and SCN_class_type categories are consistent
-        df['SCN_class'] = df['SCN_class'].astype('category')
-        df['SCN_class_type'] = df['SCN_class_type'].astype('category')
+        df[bar_groups_obsname] = df[bar_groups_obsname].astype('category')
+        df[bar_subgroups_obsname] = df[bar_subgroups_obsname].astype('category')
 
         # Reindex and filter each DataFrame to ensure all SCN_class values are present
         counts = df.groupby(bar_groups_obsname)[bar_subgroups_obsname].value_counts().unstack().fillna(0)

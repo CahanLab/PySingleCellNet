@@ -164,6 +164,114 @@ def gnrBP(expDat,cellLabels,topX=50):
         ans[levels[i]]=tmpAns
     return ans
 
+
+def generate_gene_pairs(
+    cgenes_list: dict,
+    npairs: int = 50,
+    genes_const: list = None,
+    prop_other: float = 0.4,
+    prop_same: float = 0.4
+) -> np.ndarray:
+    """
+    Generate a random selection of gene pairs for each list in cgenes_list and 
+    return them as a flattened NumPy array of unique pair strings.
+    
+    :param cgenes_list: A dict where each value is a list of genes. 
+                       Example: {'A': ['geneA1', 'geneA2'], 'B': ['geneB1', 'geneB2', ...], ...}
+    :param npairs: Total number of gene pairs to generate for each key in cgenes_list.
+    :param genes_const: Optional list of genes to draw from for the 'const' category.
+    :param prop_other: Proportion of pairs (out of npairs) whose second gene will be from OTHER lists.
+    :param prop_same: Proportion of pairs whose second gene will be from the SAME list as the first gene.
+    :return: A 1D NumPy array of unique gene pairs (e.g. ["gene1_gene2", "geneA_geneB", ...]).
+    
+    The function ensures that:
+      1) prop_other + prop_same <= 1.0
+      2) Each list in cgenes_list has length > 0
+      3) If genes_const is provided (and non-empty), then prop_other + prop_same < 1.0
+      
+    If genes_const is used, then prop_const = 1 - (prop_other + prop_same). 
+    This will be the proportion of pairs whose second gene is drawn from genes_const.
+    
+    Additionally, no gene pair will be made of the same two genes (i.e. g1 != g2).
+    """
+
+    def pick_different_gene(current_gene, gene_pool):
+        """
+        Return a random gene from gene_pool that is not equal to current_gene.
+        If no such gene is found, return None.
+        """
+        valid_genes = [g for g in gene_pool if g != current_gene]
+        if not valid_genes:
+            return None
+        return rand.choice(valid_genes)
+    
+    # 1) Basic checks
+    if (prop_other + prop_same) > 1.0:
+        raise ValueError("prop_other + prop_same cannot exceed 1.0.")
+    
+    # 2) Check that each list in cgenes_list has length > 0
+    for key, gene_list in cgenes_list.items():
+        if len(gene_list) == 0:
+            raise ValueError(f"The gene list for key '{key}' is empty. Each list must have length > 0.")
+    
+    # 3) If genes_const is given, check prop_other + prop_same < 1 and compute prop_const
+    prop_const = 0.0
+    if genes_const is not None and len(genes_const) > 0:
+        if (prop_other + prop_same) >= 1.0:
+            raise ValueError("If genes_const is used, prop_other + prop_same must be < 1.0.")
+        prop_const = 1.0 - (prop_other + prop_same)
+    else:
+        # If genes_const is None or empty, we don't use the const category at all
+        genes_const = []
+    
+    # This will hold *all* pairs (flattened) across all keys
+    all_pairs = []
+    
+    # For each group in cgenes_list, generate npairs of gene pairs
+    for key, gene_list in cgenes_list.items():
+        # Determine how many pairs come from 'same', 'other', and 'const'
+        same_count = int(round(npairs * prop_same))
+        other_count = int(round(npairs * prop_other))
+        const_count = int(round(npairs * prop_const))
+        
+        # Fix any rounding discrepancy
+        total_assigned = same_count + other_count + const_count
+        leftover = npairs - total_assigned
+        
+        # Distribute leftover to one of the categories (simplest: add to 'same')
+        same_count += leftover
+        
+        # --- SAME pairs (both genes from same list, g2 != g1) ---
+        for _ in range(same_count):
+            g1 = rand.choice(gene_list)
+            g2 = pick_different_gene(g1, gene_list)
+            if g2 is not None:
+                all_pairs.append(f"{g1}_{g2}")
+        
+        # --- OTHER pairs (second gene from other lists, g2 != g1) ---
+        other_genes = []
+        for other_key, other_list in cgenes_list.items():
+            if other_key != key:
+                other_genes.extend(other_list)
+        
+        for _ in range(other_count):
+            g1 = rand.choice(gene_list)
+            g2 = pick_different_gene(g1, other_genes)
+            if g2 is not None:
+                all_pairs.append(f"{g1}_{g2}")
+        
+        # --- CONST pairs (second gene from genes_const, g2 != g1) ---
+        for _ in range(const_count):
+            g1 = rand.choice(gene_list)
+            g2 = pick_different_gene(g1, genes_const)
+            if g2 is not None:
+                all_pairs.append(f"{g1}_{g2}")
+    
+    # Convert to a NumPy array of unique values
+    return np.unique(all_pairs)
+
+
+
 def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, quickPairs = True, propOther: float = 0.5):
     if not quickPairs:
         genes=expDat.columns.values
@@ -179,7 +287,7 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
         start= stp
         stp= start + sliceSize
         while start < nPairs:
-            print(start)
+            # print(start)
             if stp > nPairs:
                 stp =  nPairs
             tmpTab = pairTab.iloc[start:stp,:]
@@ -204,10 +312,14 @@ def ptGetTop (expDat, cell_labels, cgenes_list=None, topX=50, sliceSize = 5000, 
         for g in grps:
             # print(g)
             genes=cgenes_list[g]
+            tmpMaxPer = 3
+            if len(genes) < topX:
+                tmpMaxPer = 8
+            
             pairTab=makePairTab(genes)
             nPairs=len(pairTab)
             tmpPdat=ptSmall(expDat, pairTab)
-            tmpAns=findBestPairs(sc_testPattern(myPatternG[g],tmpPdat), topX)
+            tmpAns=findBestPairs(sc_testPattern(myPatternG[g],tmpPdat), topX, maxPer = tmpMaxPer)
             res.append(tmpAns)
             # to add here also select from cgenes_list[-g]
             notg = [item for item in grps if item != g]
@@ -450,6 +562,174 @@ def get_classy_genes_2(
     cgenes2 = list(set(gene_list))
     
     return cgenes2, grps, gene_dict
+
+
+def get_classy_genes_3(
+    adata,
+    groupby,
+    key_name="rank_genes_groups",  # Default differential expression key
+    topX_per_diff_type=10,
+    pval=0.01,
+    bottom_min_in=0.15,
+    bottom_max_out=0.1,
+    top_min_in=0.4,
+    top_max_out=0.25,
+    proportion_top=1,
+    k_of_knn=1,
+    layer="lognorm",
+    min_genes=20,  # NEW: minimum number of genes required per cluster
+):
+    """
+    Identifies cell-type-specific genes using differential expression analysis 
+    and kNN graph-based comparisons. If a cluster doesn't meet the min_genes 
+    requirement, it uses a fallback strategy to find additional genes.
+    
+    Args:
+        adata (AnnData): The AnnData object containing single-cell data.
+        groupby (str): The .obs column to group cells by.
+        key_name (str, optional): Key in `.uns` to use for rank_genes_groups results.
+        topX_per_diff_type (int, optional): Number of top genes to select per DE comparison type.
+        pval (float, optional): P-value cutoff for differential expression.
+        bottom_min_in (float, optional): Min proportion of cells expressing a gene in the target group (for "bottom" genes).
+        bottom_max_out (float, optional): Max proportion of cells expressing a gene in reference groups (for "bottom" genes).
+        top_min_in (float, optional): Min proportion of cells expressing a gene in the target group (for "top" genes).
+        top_max_out (float, optional): Max proportion of cells expressing a gene in the reference groups (for "top" genes).
+        proportion_top (float, optional): Fraction of genes selected from the top vs bottom categories.
+        k_of_knn (int, optional): Number of neighbors in the kNN cell-type graph.
+        layer (str, optional): Which data layer to use for differential expression.
+        min_genes (int, optional): Minimum number of genes that must be identified for each cluster.
+    
+    Returns:
+        tuple: A tuple containing:
+            - cgenes2 (list): Combined list of all unique genes identified.
+            - grps (pandas.Series): Group labels from the specified `.obs` column.
+            - gene_dict (dict): Dictionary of genes specific to each group.
+    """
+    
+    # Copy the AnnData object to avoid modifying the original
+    adTemp = adata.copy()
+    grps = adata.obs[groupby]
+    groups = np.unique(grps)
+    
+    # Retrieve the general differential expression table
+    diff_tab_general = sc.get.rank_genes_groups_df(
+        adTemp, None, pval_cutoff=pval, key=key_name
+    )
+    diff_tab_general = diff_tab_general.sort_values(
+        by=["group", "pct_nz_group"], ascending=[True, False]
+    )
+    
+    gene_list = []
+    gene_dict = {}
+    
+    # Build kNN graph from dendrogram correlation matrix
+    celltype_graph = build_knn_graph(
+        adata.uns["dendrogram_" + groupby]["correlation_matrix"],
+        list(adata.obs[groupby].cat.categories),
+        k_of_knn,
+    )
+    
+    for g in groups:
+        # Filter the differential expression table for the current group
+        tempTab = diff_tab_general[diff_tab_general["group"] == g]
+        
+        # ----------------------------------------------------------------------
+        # Main strategy: gather top genes from the general DE table
+        # ----------------------------------------------------------------------
+        xlist = get_top_genes_from_df(
+            tempTab, topX=topX_per_diff_type, proportion_top=proportion_top
+        )
+        xlist += get_top_genes_from_df(
+            tempTab,
+            by_score=False,
+            topX=topX_per_diff_type,
+            min_in=bottom_min_in,
+            max_out=bottom_max_out,
+            proportion_top=proportion_top,
+        )
+        xlist += get_top_genes_from_df(
+            tempTab,
+            by_score=False,
+            topX=topX_per_diff_type,
+            min_in=top_min_in,
+            max_out=top_max_out,
+            proportion_top=proportion_top,
+        )
+        
+        # ----------------------------------------------------------------------
+        # Additional DE analysis: compare group g to its kNN neighbors
+        # ----------------------------------------------------------------------
+        other_groups = celltype_graph.vs[
+            celltype_graph.neighbors(celltype_graph.vs.find(name=g).index)
+        ]["name"]
+        
+        xdata = adata.copy()
+        subsetDF = rank_genes_subsets(
+            xdata, groupby=groupby, grpA=[g], grpB=other_groups, layer=layer, pval = pval
+        )
+        
+        # Add genes from the subset analysis
+        xlist += get_top_genes_from_df(
+            subsetDF, topX=topX_per_diff_type, proportion_top=proportion_top
+        )
+        xlist += get_top_genes_from_df(
+            subsetDF,
+            by_score=False,
+            topX=topX_per_diff_type,
+            min_in=bottom_min_in,
+            max_out=bottom_max_out,
+            proportion_top=proportion_top,
+        )
+        xlist += get_top_genes_from_df(
+            subsetDF,
+            by_score=False,
+            topX=topX_per_diff_type,
+            min_in=top_min_in,
+            max_out=top_max_out,
+            proportion_top=proportion_top,
+        )
+        
+        # De-duplicate and store results for this cell type
+        final_list = list(set(xlist))
+        gene_dict[g] = final_list
+        gene_list += final_list
+        
+        # ----------------------------------------------------------------------
+        # FALLBACK LOGIC: Check if we reached min_genes for cluster g
+        # ----------------------------------------------------------------------
+        if len(gene_dict[g]) < min_genes:
+            # For example, let's do a fallback comparison: group g vs all other cells
+            # You can change the DE method, or compare with all clusters, or relax thresholds, etc.
+            xdata_fallback = adata.copy()
+            all_others = [x for x in groups if x != g]
+            
+            # E.g., run a fallback differential expression
+            fallbackDF = rank_genes_subsets(
+                xdata_fallback, groupby=groupby, grpA=[g], grpB=all_others, layer=layer, pval=1
+            )
+            fallback_genes = get_top_genes_from_df(
+                fallbackDF, topX=(min_genes * 2),  # e.g. more generous
+                proportion_top=proportion_top
+            )
+            
+            # Maybe also relax min_in / max_out conditions in fallback or skip them.
+            # Combine fallback results
+            fallback_final = list(set(gene_dict[g] + fallback_genes))
+            
+            # If we *still* don't meet min_genes, just take the top N from fallback
+            if len(fallback_final) < min_genes:
+                # force it to the top min_genes from fallback
+                fallback_final = fallback_final[:min_genes]
+            
+            gene_dict[g] = fallback_final
+            # Merge into overall gene_list
+            gene_list += fallback_final
+    
+    # Combine all unique genes across all groups
+    cgenes2 = list(set(gene_list))
+    
+    return cgenes2, grps, gene_dict
+
 
 
 

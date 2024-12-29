@@ -541,6 +541,162 @@ def make_diff_gene_dict(
     ans['geneTab_dict'] = tmp_dict
     return ans
     
+import pandas as pd
+import igraph as ig
+import numpy as np
+from anndata import AnnData
+
+def categorize_classification(
+    adata_c: AnnData,
+    thresholds: pd.DataFrame,
+    graph: ig.Graph = None,
+    k: int = 3,
+    columns_to_ignore: list = ["rand"],
+    inplace: bool = True,
+    class_obs_name: str = 'SCN_class_argmax'
+):
+    """
+    Classify cells based on SCN scores and thresholds, then categorize 
+    multi-class cells as either 'Intermediate' or 'Hybrid' by checking 
+    the distance among their high-scoring cell types in a user-provided iGraph.
+    
+    Rules:
+      - If exactly one cell type exceeds threshold => "Singular"
+      - If zero cell types exceed threshold => "None"
+      - If more than one => check distances among all cell types in the iGraph:
+          * If ALL pairs are within k edges => "Intermediate"
+          * Else => "Hybrid"
+      - If cell is predicted as 'rand' => "Rand"
+    
+    Parameters
+    ----------
+    adata_c : AnnData
+        Annotated data matrix with:
+          - .obsm["SCN_score"]: DataFrame of SCN scores for each cell type.
+          - .obs[class_obs_name]: the predicted cell type (argmax classification).
+    thresholds : pd.DataFrame
+        Thresholds for each cell type (column names matching the SCN score columns).
+        Typically has a single row of thresholds or a Series-like shape.
+    graph : ig.Graph
+        An iGraph describing relationships between cell types. Must have 
+        vertex names matching the cell-type columns in SCN_score. 
+        If None, a ValueError is raised.
+    k : int
+        Maximum distance on the graph for cell types to be considered "Intermediate".
+        If any pair of high-scoring cell types is >= k edges apart, the cell is "Hybrid".
+    columns_to_ignore : list
+        SCN score columns to ignore (e.g. ["rand"]).
+    inplace : bool
+        If True, modifies adata_c in place. Otherwise, returns a new AnnData object.
+    class_obs_name : str
+        Name of the .obs column with the argmax classification (e.g. "SCN_class_argmax").
+    
+    Returns
+    -------
+    AnnData or None
+        If inplace=False, returns the modified AnnData. Otherwise returns None.
+    """
+    
+    if graph is None:
+        raise ValueError("A valid iGraph 'graph' must be provided. None was given.")
+    
+    # 1) Ensure SCN scores are present
+    if "SCN_score" not in adata_c.obsm:
+        raise ValueError("No 'SCN_score' in adata_c.obsm. Please provide SCN scores.")
+    
+    # 2) Prepare SCN scores and threshold checks
+    SCN_scores = adata_c.obsm["SCN_score"].copy()
+    SCN_scores.drop(columns=columns_to_ignore, inplace=True, errors='ignore')
+    
+    # Ensure that thresholds align with SCN_scores columns
+    # If thresholds is a DataFrame with 1 row, or a Series, .squeeze() should map columns well.
+    # Here we assume thresholds has columns matching SCN_scores.columns
+    exceeded = SCN_scores.sub(thresholds.squeeze(), axis=1) > 0
+    true_counts = exceeded.sum(axis=1)  # how many cell types exceed threshold
+    
+    # Make a list of which cell types exceed threshold for each cell
+    print("SCN_scores.shape:", SCN_scores.shape)
+    result_list = [
+        [col for col in exceeded.columns[exceeded.iloc[row].values]]
+        for row in range(exceeded.shape[0])
+    ]
+    
+    # 3) Initialize classification as "None", then fill in "Singular" or "Hybrid/Intermediate"
+    class_type = pd.Series(["None"] * len(true_counts), index=true_counts.index, name="SCN_class_type")
+    
+    # Single = exactly one exceeding threshold
+    singular_mask = (true_counts == 1)
+    class_type.loc[singular_mask] = "Singular"
+    print("B")
+    # 4) Build a mapping from cell type name to vertex index
+    #    We assume graph.vs["name"] are the same cell-type labels that appear in SCN_scores columns.
+    type2index = {}
+    if "name" in graph.vs.attributes():
+        type2index = {graph.vs[i]["name"]: i for i in range(graph.vcount())}
+    else:
+        raise ValueError("graph does not have a 'name' attribute for vertices.")
+    
+    def is_all_within_k_edges(cell_types):
+        """
+        Return True if *all pairs* of cell types are within k edges
+        in the graph. Otherwise False.
+        """
+        if len(cell_types) <= 1:
+            return True
+        for i in range(len(cell_types)):
+            for j in range(i + 1, len(cell_types)):
+                ct1, ct2 = cell_types[i], cell_types[j]
+                if ct1 not in type2index or ct2 not in type2index:
+                    # If we can't find a cell type in the graph, consider it not close
+                    return False
+                idx1 = type2index[ct1]
+                idx2 = type2index[ct2]
+                dist = graph.shortest_paths(idx1, idx2)[0][0]
+                if dist >= k:
+                    return False
+        return True
+    
+    print("C")
+    # More than one = multi_mask
+    multi_mask = (true_counts > 1)
+    # Get integer indices where multi_mask is True
+    multi_indices = np.where(multi_mask)[0]
+    
+    for i in multi_indices:
+        c_types = result_list[i]  
+        if is_all_within_k_edges(c_types):
+            class_type.iloc[i] = "Intermediate"
+        else:
+            class_type.iloc[i] = "Hybrid"
+    
+    print("5")
+    # 5) Build underscore-delimited strings of the cell types that exceeded threshold
+    ans = ['_'.join(lst) if lst else 'None' for lst in result_list]
+    
+    # 6) Place in obs
+    adata_c.obs['SCN_class_emp'] = ans
+    adata_c.obs['SCN_class_type'] = class_type
+    
+    # 7) Overwrite with "Rand" for cells with predicted argmax = "rand"
+    if class_obs_name not in adata_c.obs:
+        raise ValueError(f"{class_obs_name} not found in adata_c.obs.")
+    
+    adata_c.obs['SCN_class_emp'] = adata_c.obs.apply(
+        lambda row: 'Rand' if row[class_obs_name] == 'rand' else row['SCN_class_emp'],
+        axis=1
+    )
+    adata_c.obs['SCN_class_type'] = adata_c.obs.apply(
+        lambda row: 'Rand' if row[class_obs_name] == 'rand' else row['SCN_class_type'],
+        axis=1
+    )
+    
+    # 8) Return
+    if inplace:
+        return None
+    else:
+        return adata_c
+
+
 
 def class_by_threshold(adata_c: AnnData, thresholds: pd.DataFrame, relationships: dict = None, columns_to_ignore: list = ["rand"], inplace=True, class_obs_name='SCN_class_argmax'):
     """
@@ -780,6 +936,82 @@ def comp_ct_thresh(adata_c: AnnData, qTile: int = 0.05, obs_name = 'SCN_class_ar
             thrs.loc[[ct], [0]] = np.quantile(tempscores, q = qTile)
     
         return thrs
+
+
+
+def paga_connectivities_to_igraph(
+    adata,
+    threshold=0.05, 
+    paga_key="paga", 
+    connectivities_key="connectivities", 
+    group_key="auto_cluster"
+):
+    """
+    Convert a PAGA adjacency matrix (stored in adata.uns[paga_key][connectivities_key]) 
+    to an undirected iGraph object, keeping only edges whose weight >= threshold.
+    
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        The AnnData object. Must have:
+          - adata.uns[paga_key][connectivities_key]: the PAGA adjacency matrix (CSR).
+          - adata.obs[group_key].cat.categories: the node labels (one per cluster).
+    threshold : float
+        Keep only edges with weight >= this threshold.
+    paga_key : str
+        The key in adata.uns where PAGA results are stored.
+    connectivities_key : str
+        The key in adata.uns[paga_key] for the connectivity/adjacency matrix.
+    group_key : str
+        The .obs column name whose categorical .categories define the node labels.
+    
+    Returns
+    -------
+    ig.Graph
+        An undirected iGraph graph, with edges that pass the threshold, 
+        vertex names set to the cluster categories, and edge weights.
+    """
+    # 1) Pull out the adjacency matrix (CSR)
+    adjacency_csr = adata.uns[paga_key][connectivities_key]
+    
+    # 2) Convert it to COO for easy iteration
+    adjacency_coo = adjacency_csr.tocoo()
+    
+    # 3) Build lists of edges + weights, thresholding
+    edges = []
+    weights = []
+    for i, j, val in zip(adjacency_coo.row, adjacency_coo.col, adjacency_coo.data):
+        # Only keep one of (i, j) or (j, i) in an undirected graph
+        # and only keep edges above the threshold
+        if i < j and val >= threshold:
+            edges.append((i, j))
+            weights.append(val)
+    
+    # 4) Create an undirected graph in iGraph
+    g = ig.Graph(n=adjacency_csr.shape[0], edges=edges, directed=False)
+    
+    # 5) Assign edge weights
+    g.es["weight"] = weights
+    
+    # 6) If the shape of the adjacency matches the # of cluster categories, assign node names
+    if group_key in adata.obs:
+        categories = adata.obs[group_key].cat.categories
+        if len(categories) == adjacency_csr.shape[0]:
+            g.vs["name"] = list(categories)
+        else:
+            print(
+                f"Warning: adjacency matrix size ({adjacency_csr.shape[0]}) "
+                f"differs from number of categories ({len(categories)}). "
+                "Vertex names will not be assigned."
+            )
+    else:
+        print(
+            f"Warning: {group_key} not found in adata.obs; "
+            "vertex names will not be assigned."
+        )
+    
+    return g
+
 
 
 

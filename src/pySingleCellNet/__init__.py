@@ -20,7 +20,7 @@ __all__ = [
     "ut",
     "train_classifier",
     "scn_train",
-    "scn_classify",
+    "classify_anndata",
     "graph_from_nodes_and_edges",
     "comp_ct_thresh",
     "class_by_threshold",
