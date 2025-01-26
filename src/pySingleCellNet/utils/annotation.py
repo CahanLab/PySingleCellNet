@@ -4,7 +4,7 @@ import pandas as pd
 from anndata import AnnData
 import matplotlib.pyplot as plt
 import scanpy as sc
-import mygene
+#import mygene
 import anndata as ad
 from scipy.sparse import issparse
 import re
@@ -94,7 +94,7 @@ def write_gmt(gene_list, filename, collection_name, prefix=""):
             print(output, file=fo)
 
 def convert_ensembl_to_symbol(adata, species = 'mouse', batch_size=1000):
-    mg = mygene.MyGeneInfo()
+    # mg = mygene.MyGeneInfo()
 
     ensembl_ids = adata.var_names.tolist()
     total_ids = len(ensembl_ids)

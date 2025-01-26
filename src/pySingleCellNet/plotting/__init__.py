@@ -1,4 +1,5 @@
 from .bar import (
+    bar_compare_celltype_composition,
     stackedbar_composition,
     stackedbar_composition_list,
     stackedbar_categories,
@@ -28,6 +29,7 @@ from .scatter import (
 
 # API
 __all__ = [
+    "bar_compare_celltype_composition",
     "stackedbar_composition",
     "stackedbar_composition_list",
     "stackedbar_categories",

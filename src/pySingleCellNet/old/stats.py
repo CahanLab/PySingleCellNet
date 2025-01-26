@@ -4,7 +4,7 @@ import statsmodels.stats.multitest as smt
 import numpy as np
 from sklearn import datasets, linear_model
 from sklearn.linear_model import LinearRegression
-from scipy import stats
+from scipy import stats as scipyStats
 
 def sc_statTab(expDat, dThresh=0):
     geneNames=expDat.columns.values
@@ -96,7 +96,7 @@ def findVarGenes(geneStats,zThresh=2,meanType="overall_mean"):
         bbins=np.unique(sg["bin"])
         for b in bbins:
             if(np.unique(geneStats.loc[sg.bin==b, scaleVar[i]]).size>1):
-                tmpZ=stats.zscore(geneStats.loc[sg.bin==b, scaleVar[i]])
+                tmpZ=scipyStats.zscore(geneStats.loc[sg.bin==b, scaleVar[i]])
             else:
                 tmpZ=np.zeros(geneStats.loc[sg.bin==b, scaleVar[i]].index.size).T
             zscs.loc[sg.bin==b, mTypes[i]]=tmpZ
@@ -132,7 +132,7 @@ def sc_testPattern(pattern,expDat):
     Rsq = 1 - SS_err/SS_tot
     t_val=np.divide(p[0], C)
     res=pd.DataFrame(index=expDat.columns)
-    res["pval"]=2*stats.t.sf(np.abs(t_val), df=(n-k))
+    res["pval"]=2*scipyStats.t.sf(np.abs(t_val), df=(n-k))
     res["cval"]=(Rsq**0.5)*np.sign(t_val)
     _,res["holm"],_,_ = smt.multipletests(res["pval"].values, method="holm")
     return res

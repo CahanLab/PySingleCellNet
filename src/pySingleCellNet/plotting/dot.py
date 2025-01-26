@@ -69,6 +69,30 @@ def umi_counts_ranked(adata, total_counts_column="total_counts"):
     plt.show()
     
 
+def rela_graph(gra, color_dict): 
+    ig.config['plotting.backend'] = 'matplotlib'
+    v_style = {}
+    v_style["layout"] = "fruchterman_reingold"
+    v_style["vertex_label_dist"] = 2.5
+    v_style["vertex_label_angle"] = 3 # in radians
+    v_style["bbox"] = (600,600)
+    v_style["margin"] = (50)
+
+    for vertex in gra.vs:
+        # vertex["color"] = convert_color(color_dict.get(vertex["name"], np.array([0.5, 0.5, 0.5])))
+        vertex["color"] = tuple(color_dict.get(vertex["name"], np.array([0.5, 0.5, 0.5])))  
+
+    # Normalize node sizes for better visualization
+    max_size = 50  # Maximum size for visualization
+    min_size = 10  # Minimum size for visualization
+    ncells = gra.vs["ncells"]
+    node_sizes = [min_size + (size / max(ncells)) * (max_size - min_size) for size in ncells]
+    fig, ax = plt.subplots()
+    ig.plot(gra, **v_style, vertex_size=node_sizes)
+    plt.show()
+
+
+
 def ontogeny_graph(gra, color_dict): 
     ig.config['plotting.backend'] = 'matplotlib'
     v_style = {}

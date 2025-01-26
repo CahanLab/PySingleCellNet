@@ -1,0 +1,56 @@
+site_name: pySingleCellNet
+site_author: Patrick Cahan
+copyright: Copyright &copy; 2024 Cahan Lab
+repo_url: https://github.com/CahanLab/PySingleCellNet
+
+use_directory_urls: false
+
+extra_css:
+  - stylesheets/extra.css
+
+
+theme:
+  name: material
+  palette:
+    primary: light blue
+  logo: img/logoGlow.png
+  favicon: img/logo.png
+  features:
+    - content.footnote.tooltips
+
+markdown_extensions:
+  - md_in_html
+  - footnotes
+  - admonition
+  - attr_list
+  - tables
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            separate_signature: true
+            docstring_section_style: list
+            heading_level: 3
+  - search
+  - mkdocs-jupyter:
+      execute: false
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - How-to: 
+    - 'train & classify': 'notebooks/Basics.ipynb'
+    - 'analyze _in vitro_ cells': 'notebooks/explore.ipynb'
+#    - 'prepare training data': 'notebooks/how-to_prepare_reference_data.ipynb'
+#    - 'Train a classifier': 'notebooks/train_classifier.ipynb'
+#    - 'Enrichment analysis': 'notebooks/enrichment.ipynb'
+  - Training data: training_data.md
+  - References: refs.md
+  - API:
+    - 'Utility functions': 'utils.md'
+    - 'Classifier functions': 'classifier.md'
+    - 'Plotting functions': 'plotting.md'
+
+

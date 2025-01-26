@@ -45,7 +45,8 @@ def heatmap_classifier_report(df: pd.DataFrame,
     combined_df = pd.concat([non_avg_df, special_averages])
     metrics = ["Precision", "Recall", "F1-Score"]
     heatmap_data = combined_df.set_index("Label")[metrics]
-    h = ml.Heatmap(heatmap_data, cmap = cmap, annot=True, width=width, height=height)
+    # h = ml.Heatmap(heatmap_data, linewidth=1, cmap = cmap, annot=True, width=width, height=height)
+    h = ml.Heatmap(heatmap_data, linewidth=1, annot=True, width=width, height=height)
     
     # Group the rows to separate special averages
     h.group_rows(row_types, order=["class","avg"])
@@ -105,6 +106,91 @@ def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 
 
 
 def heatmap_gsea(
+    gmat,
+    clean_signatures=False,
+    clean_cells=False,
+    column_colors=None,
+    figsize=(8, 6),
+    label_font_size=7,
+    cbar_pos=[0.2, 0.92, 0.6, 0.02],  # Positioned at the top
+    dendro_ratio=(0.3, 0.1),
+    cbar_title='NES',
+    col_cluster=False,
+    row_cluster=False,
+):
+    """
+    Generates a heatmap with hierarchical clustering for gene set enrichment analysis (GSEA) results.
+    
+    Args:
+        gmat (pd.DataFrame):
+            A matrix of GSEA scores with gene sets as rows and samples as columns.
+        clean_signatures (bool, optional):
+            If True, removes gene sets with zero enrichment scores across all samples. Defaults to False.
+        clean_cells (bool, optional):
+            If True, removes samples with zero enrichment scores across all gene sets. Defaults to False.
+        column_colors (pd.Series or pd.DataFrame, optional):
+            Colors to annotate columns, typically representing sample groups. Defaults to None.
+        figsize (tuple, optional):
+            Figure size in inches (width, height). Defaults to (8, 6).
+        label_font_size (int, optional):
+            Font size for axis and colorbar labels. Defaults to 7.
+        cbar_pos (list, optional):
+            Position of the colorbar [left, bottom, width, height]. Defaults to [0.2, 0.92, 0.6, 0.02] for a horizontal top placement.
+        dendro_ratio (tuple, optional):
+            Proportion of the figure allocated to the row and column dendrograms. Defaults to (0.3, 0.1).
+        cbar_title (str, optional):
+            Title of the colorbar. Defaults to 'NES'.
+        col_cluster (bool, optional):
+            If True, performs hierarchical clustering on columns. Defaults to False.
+        row_cluster (bool, optional):
+            If True, performs hierarchical clustering on rows. Defaults to False.
+    
+    Returns:
+        None
+    
+    Displays:
+        A heatmap with optional hierarchical clustering and a horizontal colorbar at the top.
+    """
+    gsea_matrix = gmat.copy()
+    if clean_cells:
+        gsea_matrix = gsea_matrix.loc[:, gsea_matrix.sum(0) != 0]
+    if clean_signatures:
+        gsea_matrix = gsea_matrix.loc[gsea_matrix.sum(1) != 0, :]
+    
+    # plt.figure(constrained_layout=True)
+    ax = sns.clustermap(
+        data=gsea_matrix,
+        cmap=Roma_20.mpl_colormap.reversed(),
+        center=0,
+        yticklabels=1,
+        xticklabels=1,
+        linewidth=.05,
+        linecolor='white',
+        method='average',
+        metric='euclidean',
+        dendrogram_ratio=dendro_ratio,
+        col_colors=column_colors,
+        figsize=figsize,
+        row_cluster=row_cluster,
+        col_cluster=col_cluster,
+        cbar_pos=cbar_pos,
+        cbar_kws={'orientation': 'horizontal'}
+    )
+    
+    ax.ax_cbar.set_title(cbar_title, fontsize=label_font_size, pad=10)
+    ax.ax_cbar.tick_params(labelsize=label_font_size, direction='in')
+    
+    # Adjust tick labels and heatmap appearance
+    ax.ax_row_dendrogram.set_visible(False)
+    ax.ax_col_dendrogram.set_visible(False)
+    ax.ax_heatmap.set_yticklabels(ax.ax_heatmap.get_ymajorticklabels(), fontsize=label_font_size)
+    ax.ax_heatmap.set_xticklabels(ax.ax_heatmap.get_xmajorticklabels(), rotation=45, ha="right", rotation_mode="anchor", fontsize=label_font_size)
+    
+    # plt.subplots_adjust(top=0.85)
+    plt.show()
+
+
+def heatmap_gsea_middle(
     gmat,
     clean_signatures = False,
     clean_cells = False,

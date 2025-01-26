@@ -1,4 +1,3 @@
-# import datetime
 import numpy as np
 import pandas as pd
 from anndata import AnnData
@@ -6,10 +5,130 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 import anndata as ad
 from scipy.sparse import issparse
-# import re
 from alive_progress import alive_bar
 import string
+import igraph as ig
 
+def generate_joint_graph(adata, connectivity_keys, weights, output_key='jointNeighbors'):
+    """Create a joint graph by combining multiple connectivity graphs with specified weights.
+    
+    This function computes the weighted sum of selected connectivity and distance matrices 
+    in an AnnData object and stores the result in `.obsp`.
+    
+    Args:
+        adata (AnnData): 
+            The AnnData object containing connectivity matrices in `.obsp`.
+        connectivity_keys (list of str): 
+            A list of keys in `adata.obsp` corresponding to connectivity matrices to combine.
+        weights (list of float): 
+            A list of weights for each connectivity matrix. Must match the length of `connectivity_keys`.
+        output_key (str, optional): 
+            The base key under which to store the combined graph in `.obsp`. 
+            The default is `'jointNeighbors'`.
+    
+    Raises:
+        ValueError: If the number of `connectivity_keys` does not match the number of `weights`.
+        KeyError: If any key in `connectivity_keys` or its corresponding distances key is not found in `adata.obsp`.
+    
+    Returns:
+        None: 
+            Updates the AnnData object in place by adding the combined connectivity and distance matrices
+            to `.obsp` and metadata to `.uns`.
+    
+    Example:
+        >>> generate_joint_graph(adata, ['neighbors_connectivities', 'umap_connectivities'], [0.7, 0.3])
+        >>> adata.obsp['jointNeighbors_connectivities']
+        >>> adata.uns['jointNeighbors']
+    """
+
+    if len(connectivity_keys) != len(weights):
+        raise ValueError("The number of connectivity keys must match the number of weights.")
+    
+    # Initialize the joint graph and distances matrix with zeros
+    joint_graph = None
+    joint_distances = None
+    # Loop through each connectivity key and weight
+    for key, weight in zip(connectivity_keys, weights):
+        if key not in adata.obsp:
+            raise KeyError(f"'{key}' not found in adata.obsp.")
+        
+        # Retrieve the connectivity matrix
+        connectivity_matrix = adata.obsp[key]
+        # Assume corresponding distances key exists
+        distances_key = key.replace('connectivities', 'distances')
+        if distances_key not in adata.obsp:
+            raise KeyError(f"'{distances_key}' not found in adata.obsp.")
+        distances_matrix = adata.obsp[distances_key]
+        # Initialize or accumulate the weighted connectivity and distances matrices
+        if joint_graph is None:
+            joint_graph = weight * connectivity_matrix
+            joint_distances = weight * distances_matrix
+        else:
+            joint_graph += weight * connectivity_matrix
+            joint_distances += weight * distances_matrix
+        
+    # Save the resulting joint graph and distances matrix in the specified keys of .obsp
+    
+    adata.obsp[output_key + '_connectivities'] = joint_graph
+    adata.obsp[output_key + '_distances'] = joint_distances
+    
+    # Save metadata about the joint graph in .uns
+    adata.uns[output_key] = {
+        'connectivities_key': output_key + '_connectivities',
+        'distances_key': output_key + '_distances',
+        'params': {
+            'connectivity_keys': connectivity_keys,
+            'weights': weights,
+            'method': "umap"
+        }
+    }
+
+
+def combine_pca_scores(adata, n_pcs=50, score_key='SCN_score'):
+    """Combine principal components and gene set scores into a single matrix.
+
+    This function merges the top principal components (PCs) and gene set scores 
+    into a combined matrix stored in `.obsm`.
+
+    Args:
+        adata (AnnData): 
+            AnnData object containing PCA results and gene set scores in `.obsm`.
+        n_pcs (int, optional): 
+            Number of top PCs to include. Default is 50.
+        score_key (str, optional): 
+            Key in `.obsm` where gene set scores are stored. Default is `'SCN_score'`.
+
+    Raises:
+        ValueError: If `'X_pca'` is not found in `.obsm`.  
+        ValueError: If `score_key` is missing in `.obsm`.
+
+    Returns:
+        None: Updates `adata` by adding the combined matrix to `.obsm['X_pca_scores_combined']`.
+
+    Example:
+        >>> combine_pca_scores(adata, n_pcs=30, score_key='GeneSet_Score')
+    """
+
+    # Ensure that the required data exists in .obsm
+    if 'X_pca' not in adata.obsm:
+        raise ValueError("X_pca not found in .obsm. Perform PCA before combining.")
+    
+    if score_key not in adata.obsm:
+        raise ValueError(f"{score_key} not found in .obsm. Please provide valid gene set scores.")
+    
+    # Extract the top n_pcs from .obsm['X_pca']
+    pca_matrix = adata.obsm['X_pca'][:, :n_pcs]
+    
+    # Extract the gene set scores from .obsm
+    score_matrix = adata.obsm[score_key]
+    
+    # Combine PCA matrix and score matrix horizontally (along columns)
+    combined_matrix = np.hstack([pca_matrix, score_matrix])
+    
+    # Add the combined matrix back into .obsm with a new key
+    adata.obsm['X_pca_scores_combined'] = combined_matrix
+
+    print(f"Combined matrix with {n_pcs} PCs and {score_matrix.shape[1]} gene set scores added to .obsm['X_pca_scores_combined'].")
 
 
 def rename_cluster_labels(
@@ -128,6 +247,8 @@ def assign_optimal_cluster(adata, cluster_reports, new_col="optimal_cluster"):
     
     # Store the new labels in an adata.obs column
     adata.obs[new_col] = optimal_labels
+    # convert to categorical
+    adata.obs[new_col] = adata.obs[new_col].astype('category')
 
 
 def reassign_selected_clusters(
@@ -264,7 +385,7 @@ def reassign_selected_clusters(
     
     adata.obs[new_label] = new_assignments
     # make sure type is category, seems to be needed for sc.tl.dendrogram
-    adata.obs[new_label] = adata.obs[new_labe].astype('category')
+    adata.obs[new_label] = adata.obs[new_label].astype('category')
 
 
 def rank_genes_subsets(
@@ -343,15 +464,126 @@ def build_knn_graph(correlation_matrix, labels, k=5):
     return g
 
 
-def split_adata_indices(adata, ncells, dLevel="cell_ontology_class", cellid=None, strata_col=None):
+
+def split_adata_indices(
+    adata: AnnData,
+    n_cells: int = 100,
+    groupby: str = "cell_ontology_class",
+    cellid: str = None,
+    strata_col: str  = None
+) -> tuple:
+    """
+    Splits an AnnData object into training and validation indices based on stratification by cell type
+    and optionally by another categorical variable.
+    
+    Args:
+        adata (AnnData): The annotated data matrix to split.
+        n_cells (int): The number of cells to sample per cell type.
+        groupby (str, optional): The column name in adata.obs that specifies the cell type.
+                                 Defaults to "cell_ontology_class".
+        cellid (str, optional): The column in adata.obs to use as a unique identifier for cells.
+                                If None, it defaults to using the index.
+        strata_col (str, optional): The column name in adata.obs used for secondary stratification,
+                                    such as developmental stage, gender, or disease status.
+    
+    Returns:
+        tuple: A tuple containing two lists:
+            - training_indices (list): List of indices for the training set.
+            - validation_indices (list): List of indices for the validation set.
+    
+    Raises:
+        ValueError: If any specified column names do not exist in the DataFrame.
+    """
+    if cellid is None:
+        adata.obs["cellid"] = adata.obs.index
+        cellid = "cellid"
+    if groupby not in adata.obs.columns or (strata_col and strata_col not in adata.obs.columns):
+        raise ValueError("Specified column names do not exist in the DataFrame.")
+    
+    cts = set(adata.obs[groupby])
+    trainingids = []
+    
+    for ct in cts:
+        subset = adata[adata.obs[groupby] == ct]
+        
+        if strata_col:
+            stratified_ids = []
+            strata_groups = subset.obs[strata_col].unique()
+            n_strata = len(strata_groups)
+            
+            # Initialize desired count and structure to store samples per strata
+            desired_per_group = n_cells // n_strata
+            samples_per_group = {}
+            remaining = 0
+            
+            # First pass: allocate base quota or maximum available if less than base
+            for group in strata_groups:
+                group_subset = subset[subset.obs[strata_col] == group]
+                available = group_subset.n_obs
+                if available < desired_per_group:
+                    samples_per_group[group] = available
+                    remaining += desired_per_group - available
+                else:
+                    samples_per_group[group] = desired_per_group
+                
+            # Second pass: redistribute remaining quota among groups that can supply more
+            # Continue redistributing until either there's no remaining quota or no group can supply more.
+            groups_can_supply = True
+            while remaining > 0 and groups_can_supply:
+                groups_can_supply = False
+                for group in strata_groups:
+                    group_subset = subset[subset.obs[strata_col] == group]
+                    available = group_subset.n_obs
+                    # Check if this group can supply an extra cell beyond what we've allocated so far
+                    if samples_per_group[group] < available:
+                        samples_per_group[group] += 1
+                        remaining -= 1
+                        groups_can_supply = True
+                        if remaining == 0:
+                            break
+                        
+            # Sample cells for each strata group based on the determined counts
+            for group in strata_groups:
+                group_subset = subset[subset.obs[strata_col] == group]
+                count_to_sample = samples_per_group.get(group, 0)
+                if count_to_sample > 0:
+                    sampled_ids = np.random.choice(
+                        group_subset.obs[cellid].values, 
+                        count_to_sample, 
+                        replace=False
+                    )
+                    stratified_ids.extend(sampled_ids)
+                
+            trainingids.extend(stratified_ids)
+        else:
+            ccount = min(subset.n_obs, n_cells)
+            sampled_ids = np.random.choice(subset.obs[cellid].values, ccount, replace=False)
+            trainingids.extend(sampled_ids)
+        
+    # Get all unique IDs
+    all_ids = adata.obs[cellid].values
+    # Determine validation IDs
+    assume_unique = adata.obs_names.is_unique
+    val_ids = np.setdiff1d(all_ids, trainingids, assume_unique=assume_unique)
+    
+    return trainingids, val_ids
+
+
+def old_split_adata_indices(
+    adata: AnnData,
+    n_cells: int = 100,
+    groupby: str = "cell_ontology_class",
+    cellid: str = None,
+    strata_col: str  = None
+) -> tuple:
     """
     Splits an AnnData object into training and validation indices based on stratification by cell type
     and optionally by another categorical variable.
 
     Args:
         adata (AnnData): The annotated data matrix to split.
-        ncells (int): The number of cells to sample per cell type.
-        dLevel (str, optional): The column name in adata.obs that specifies the cell type. Defaults to "cell_ontology_class".
+        n_cells (int): The number of cells to sample per cell type.
+        groupby(str, optional): The column name in adata.obs that specifies the cell type. Defaults to "cell_ontology_class".
         cellid (str, optional): The column in adata.obs to use as a unique identifier for cells. If None, it defaults to using the index.
         strata_col (str, optional): The column name in adata.obs used for secondary stratification, such as developmental stage, gender, or disease status.
 
@@ -366,15 +598,15 @@ def split_adata_indices(adata, ncells, dLevel="cell_ontology_class", cellid=None
     if cellid is None:
         adata.obs["cellid"] = adata.obs.index
         cellid = "cellid"
-    if dLevel not in adata.obs.columns or (strata_col and strata_col not in adata.obs.columns):
+    if groupby not in adata.obs.columns or (strata_col and strata_col not in adata.obs.columns):
         raise ValueError("Specified column names do not exist in the DataFrame.")
 
-    cts = set(adata.obs[dLevel])
+    cts = set(adata.obs[groupby])
     trainingids = []
 
     for ct in cts:
         # print(ct, ": ")
-        subset = adata[adata.obs[dLevel] == ct]
+        subset = adata[adata.obs[groupby] == ct]
 
         if strata_col:
             stratified_ids = []
@@ -382,14 +614,14 @@ def split_adata_indices(adata, ncells, dLevel="cell_ontology_class", cellid=None
             
             for group in strata_groups:
                 group_subset = subset[subset.obs[strata_col] == group]
-                ccount = min(group_subset.n_obs, ncells // len(strata_groups))
+                ccount = min(group_subset.n_obs, n_cells // len(strata_groups))
                 if ccount > 0:
                     sampled_ids = np.random.choice(group_subset.obs[cellid].values, ccount, replace=False)
                     stratified_ids.extend(sampled_ids)
 
             trainingids.extend(stratified_ids)
         else:
-            ccount = min(subset.n_obs, ncells)
+            ccount = min(subset.n_obs, n_cells)
             sampled_ids = np.random.choice(subset.obs[cellid].values, ccount, replace=False)
             trainingids.extend(sampled_ids)
 
@@ -900,7 +1132,7 @@ def sample_cells(
 
     return sampled_adata
 
-
+# outdated
 def compute_mean_expression_per_cluster(
     adata,
     cluster_key
@@ -944,48 +1176,6 @@ def compute_mean_expression_per_cluster(
     #return adata
 
 
-
-def split_common_anndata(adata, ncells, dLevel="cell_ontology_class", cellid = None, cells_reserved = 3):
-    if cellid == None: 
-         adata.obs["cellid"] = adata.obs.index
-         cellid = "cellid"
-    cts = set(adata.obs[dLevel])
-
-    trainingids = np.empty(0)
-    
-    n_cts = len(cts)
-    with alive_bar(n_cts, title="Splitting data") as bar:
-        for ct in cts:
-            # print(ct, ": ")
-            aX = adata[adata.obs[dLevel] == ct, :]
-            ccount = aX.n_obs - cells_reserved
-            ccount = min([ccount, ncells])
-            # print(aX.n_obs)
-            trainingids = np.append(trainingids, np.random.choice(aX.obs[cellid].values, ccount, replace = False))
-            bar()
-
-    val_ids = np.setdiff1d(adata.obs[cellid].values, trainingids, assume_unique = True)
-    aTrain = adata[np.isin(adata.obs[cellid], trainingids, assume_unique = True),:]
-    aTest = adata[np.isin(adata.obs[cellid], val_ids, assume_unique = True),:]
-    return([aTrain, aTest])
-
-def splitCommon(expData, ncells,sampTab, dLevel="cell_ontology_class", cells_reserved = 3):
-    cts = set(sampTab[dLevel])
-    trainingids = np.empty(0)
-    for ct in cts:
-        aX = expData.loc[sampTab[dLevel] == ct, :]
-        # print(ct, ": ")
-        ccount = len(aX.index) - cells_reserved
-        ccount = min([ccount, ncells])
-        # print(ccount)
-        trainingids = np.append(trainingids, np.random.choice(aX.index.values, ccount, replace = False))
-    val_ids = np.setdiff1d(sampTab.index, trainingids, assume_unique = True)
-    aTrain = expData.loc[np.isin(sampTab.index.values, trainingids, assume_unique = True),:]
-    aTest = expData.loc[np.isin(sampTab.index.values, val_ids, assume_unique = True),:]
-    return([aTrain, aTest])
-
-
-
 def find_elbow(
     adata
 ):
@@ -1017,27 +1207,6 @@ def find_elbow(
     # Index of the point with max distance to the line
     elbow_idx = np.argmax(dist_to_line)
     return elbow_idx
-
-
-# convert adata.uns[x] into a dict  data.frames
-#### SEE postclass_analysis.py convert_rank_genes_groups_to_dict()
-def convert_diffExp_to_dict(
-    adata,
-    uns_name: str = 'rank_genes_groups'
-):
-    
-    # sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method=test_name)
-    # tempTab = pd.DataFrame(adata.uns[uns_name]['names']).head(topX)
-    tempTab = sc.get.rank_genes_groups_df(adata, group = None, key=uns_name)
-    tempTab = tempTab.dropna()
-    groups = tempTab['group'].cat.categories.to_list()
-    #groups = np.unique(grps)
-
-    ans = {}
-    for g in groups:
-        ans[g] = tempTab[tempTab['group']==g].copy()
-    return ans
-
 
 
 
