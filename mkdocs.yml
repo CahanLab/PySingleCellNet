@@ -47,11 +47,11 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
+          paths: [src]
           options:
             separate_signature: true
             docstring_section_style: list
             heading_level: 3
-            paths: [src]
   - search
   - mkdocs-jupyter:
       execute: false
