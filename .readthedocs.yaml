@@ -6,7 +6,7 @@ build:
     python: "3"
   jobs:
     pre_install:
-      - pip install mkdocs-material
+      - pip install mkdocs-material mkdocstrings mkdocs-jupyter
 
 mkdocs:
   configuration: mkdocs.yml
