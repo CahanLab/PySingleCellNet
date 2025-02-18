@@ -1,6 +1,4 @@
-# Installation
-
-PySingleCellnet needs several packages, most of which can be installed with pip, and some are available in conda channels.
+PySingleCellnet depends on several packages, most of which can be installed with pip, and some are available in conda channels.
 
 ### Prerequisites
 

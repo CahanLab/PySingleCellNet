@@ -15,7 +15,7 @@ from alive_progress import alive_bar
 #from .scn_assess import create_classifier_report
 from ..utils import build_knn_graph, rank_genes_subsets, get_unique_colors, split_adata_indices
 from sklearn.metrics import classification_report
-from pySingleCellNet.config import SCN_DIFFEXP_KEY
+from pySingleCellNet.config import SCN_DIFFEXP_KEY, SCN_CATEGORY_COLOR_DICT
 import random as rand 
 
 def _query_transform(expMat, genePairs):
@@ -166,7 +166,7 @@ def _get_classy_genes_3(
     top_max_out=0.25,
     proportion_top=1,
     k_of_knn=1,
-    layer="lognorm",
+    layer=None, #"lognorm",
     min_genes=20,  # NEW: minimum number of genes required per cluster
 ):
     """
@@ -429,7 +429,14 @@ def classify_anndata(adata: AnnData, rf_tsp, nrand: int = 0):
     adata.obs['SCN_class_argmax'] = pd.Categorical(predicted_classes, categories=possible_classes, ordered=True)
 
     # store this for consistent coloring
-    adata.uns['SCN_class_colors'] = rf_tsp['ctColors']        
+    # adata.uns['SCN_class_colors'] = rf_tsp['ctColors']        
+
+    # import matplotlib.colors as mcolors
+    # celltype_colors = rf_tsp['ctColors']
+    # mycolors = [celltype_colors[ct] for ct in adata.obs['SCN_class_argmax'].cat.categories]
+    # cmap = mcolors.ListedColormap(mycolors)
+    adata.uns['SCN_class_argmax_colors'] = rf_tsp['ctColors']
+
     # can return copy if called for
     # return adata if copy else None
 
@@ -458,8 +465,8 @@ def train_classifier(aTrain,
     dLevel,
     nRand = None,
     cell_type_to_color = None,
-    nTopGenes = 20,
-    nTopGenePairs = 20,
+    nTopGenes = 30,
+    nTopGenePairs = 40,
     nTrees = 1000,
     propOther=0.5,
     layer = None,
@@ -513,6 +520,7 @@ def train_classifier(aTrain,
             cell_types.append('rand')
             unique_colors = get_unique_colors(len(cell_types))
             cell_type_to_color = {cell_type: color for cell_type, color in zip(cell_types, unique_colors)}
+            cell_type_to_color['rand'] = SCN_CATEGORY_COLOR_DICT['Rand']
         bar() # Bar 5
 
         argList = {'nRand': nRand, 'nTopGenes': nTopGenes, 'nTopGenePairs': nTopGenePairs, 'nTrees': nTrees, 'propOther': propOther}
@@ -687,12 +695,12 @@ def train_and_assess(
     propOther = 0.25,
     obs_pred = 'SCN_class_argmax',
     return_clf = False,
-    layer = 'lognorm',
+    layer = None,
     strata_col = 'stage',
     n_comps = 50
 ):
     nRand = ncells
-    tids, vids = split_adata_indices(adata, ncells, dLevel=groupby, cellid=None, strata_col=strata_col)
+    tids, vids = split_adata_indices(adata, ncells, groupby=groupby, cellid=None, strata_col=strata_col)
     adTrain = adata[tids].copy()
     # train
     clf = train_classifier(adTrain, dLevel = groupby, nTopGenes = nTopGenes, nTopGenePairs = nTopGenePairs, nRand = nRand, nTrees = nTrees, layer=layer, propOther=propOther, n_comps = n_comps)

@@ -64,7 +64,15 @@ def heatmap_classifier_report(df: pd.DataFrame,
     h.render()
 
 
-def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 1, obsm_name='SCN_score', order_by: str = None):
+def heatmap_scores(
+    adata: AnnData, 
+    groupby: str, 
+    vmin: float = 0, 
+    vmax: float = 1, 
+    obsm_name='SCN_score', 
+    order_by: str = None,
+    figure_subplot_bottom: float = 0.4
+):
     """
     Plots a heatmap of single cell scores, grouping cells according to a specified .obs column and optionally ordering within each group.
 
@@ -95,14 +103,12 @@ def heatmap_scores(adata: AnnData, groupby: str, vmin: float = 0, vmax: float = 
     adTemp = adTemp[sorted_order, :]
     
     # Set figure dimensions and subplot adjustments
-    fsize = [5, 6]
-    plt.rcParams['figure.subplot.bottom'] = 0.25
+    # fsize = [5, 6]
+    # plt.rcParams['figure.subplot.bottom'] = figure_subplot_bottom
     
     # Plot the heatmap with the sorted and grouped data
-    sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, 
-                  cmap=Batlow_20.mpl_colormap,
-                  dendrogram=False, swap_axes=True, vmin=vmin, vmax=vmax, 
-                  figsize=fsize)
+    with plt.rc_context({'figure.subplot.bottom': figure_subplot_bottom}):
+        sc.pl.heatmap(adTemp, adTemp.var_names.values, groupby=groupby, cmap=Batlow_20.mpl_colormap,dendrogram=False, swap_axes=True, vmin=vmin, vmax=vmax)
 
 
 def heatmap_gsea(

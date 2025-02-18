@@ -15,7 +15,8 @@ from .categorize import (
 from .comparison import (
     gsea_on_deg,
     collect_gsea_results_from_dict,
-    convert_diffExp_to_dict
+    convert_diffExp_to_dict,
+    deg
 )
 
 # API
@@ -30,6 +31,7 @@ __all__ = [
     "graph_from_nodes_and_edges",
     "gsea_on_deg",
     "collect_gsea_results_from_dict",
-    "convert_diffExp_to_dict"
+    "convert_diffExp_to_dict",
+    "deg"
 ]
 

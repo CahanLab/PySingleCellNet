@@ -5,6 +5,113 @@ import matplotlib.pyplot as plt
 import scanpy as sc
 import anndata as ad
 
+import mygene
+
+from collections import defaultdict
+
+
+# Obsolete
+def convert_ensembl_to_symbol(adata, species = 'mouse', batch_size=1000):
+    # mg = mygene.MyGeneInfo()
+
+    ensembl_ids = adata.var_names.tolist()
+    total_ids = len(ensembl_ids)
+    chunks = [ensembl_ids[i:i + batch_size] for i in range(0, total_ids, batch_size)]
+
+    id_symbol_dict = {}
+
+    # Querying in chunks
+    for chunk in chunks:
+        result = mg.querymany(chunk, scopes='ensembl.gene', fields='symbol', species=species)
+        chunk_dict = {item['query']: item['symbol'] for item in result if 'symbol' in item}
+        id_symbol_dict.update(chunk_dict)
+
+    # Find IDs without a symbol
+    unmapped_ids = set(ensembl_ids) - set(id_symbol_dict.keys())
+    print(f"Found {len(unmapped_ids)} Ensembl IDs without a gene symbol")
+
+    # Remove unmapped IDs
+    adata = adata[:, ~adata.var_names.isin(list(unmapped_ids))]
+
+    # Convert the remaining IDs to symbols and update 'var' DataFrame index
+    adata.var.index = [id_symbol_dict[id] for id in adata.var_names]
+
+    # Ensure index has no name to avoid '_index' conflict
+    adata.var.index.name = None
+    
+    return adata
+
+
+
+def old_split_adata_indices(
+    adata: AnnData,
+    n_cells: int = 100,
+    groupby: str = "cell_ontology_class",
+    cellid: str = None,
+    strata_col: str  = None
+) -> tuple:
+    """
+    Splits an AnnData object into training and validation indices based on stratification by cell type
+    and optionally by another categorical variable.
+
+    Args:
+        adata (AnnData): The annotated data matrix to split.
+        n_cells (int): The number of cells to sample per cell type.
+        groupby(str, optional): The column name in adata.obs that specifies the cell type. Defaults to "cell_ontology_class".
+        cellid (str, optional): The column in adata.obs to use as a unique identifier for cells. If None, it defaults to using the index.
+        strata_col (str, optional): The column name in adata.obs used for secondary stratification, such as developmental stage, gender, or disease status.
+
+    Returns:
+        tuple: A tuple containing two lists:
+            - training_indices (list): List of indices for the training set.
+            - validation_indices (list): List of indices for the validation set.
+
+    Raises:
+        ValueError: If any specified column names do not exist in the DataFrame.
+    """
+    if cellid is None:
+        adata.obs["cellid"] = adata.obs.index
+        cellid = "cellid"
+    if groupby not in adata.obs.columns or (strata_col and strata_col not in adata.obs.columns):
+        raise ValueError("Specified column names do not exist in the DataFrame.")
+
+    cts = set(adata.obs[groupby])
+    trainingids = []
+
+    for ct in cts:
+        # print(ct, ": ")
+        subset = adata[adata.obs[groupby] == ct]
+
+        if strata_col:
+            stratified_ids = []
+            strata_groups = subset.obs[strata_col].unique()
+            
+            for group in strata_groups:
+                group_subset = subset[subset.obs[strata_col] == group]
+                ccount = min(group_subset.n_obs, n_cells // len(strata_groups))
+                if ccount > 0:
+                    sampled_ids = np.random.choice(group_subset.obs[cellid].values, ccount, replace=False)
+                    stratified_ids.extend(sampled_ids)
+
+            trainingids.extend(stratified_ids)
+        else:
+            ccount = min(subset.n_obs, n_cells)
+            sampled_ids = np.random.choice(subset.obs[cellid].values, ccount, replace=False)
+            trainingids.extend(sampled_ids)
+
+        # print(subset.n_obs)
+
+    # Get all unique IDs
+    all_ids = adata.obs[cellid].values
+    # Determine validation IDs
+    assume_unique = adata.obs_names.is_unique
+    val_ids = np.setdiff1d(all_ids, trainingids, assume_unique=assume_unique)
+
+    # Return indices instead of actual subsets
+    return trainingids, val_ids
+
+
+
 def old_paga_connectivities_to_igraph(
     adInput,
     n_neighbors = 10,

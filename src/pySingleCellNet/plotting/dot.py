@@ -8,7 +8,6 @@ import warnings
 import umap
 import anndata as ad
 import igraph as ig
-# from igraph import Graph
 from palettable.colorbrewer.qualitative import Set2_6
 from palettable.tableau import GreenOrange_6
 from palettable.cartocolors.qualitative import Safe_6
@@ -271,7 +270,7 @@ def umap_scores(
     adTemp.obsm['X_umap'] = adata.obsm['X_umap'].copy()
     
     # Create the UMAP plot
-    ax =c(adTemp, color=scn_classes, alpha=alpha, s=s, vmin=0, vmax=1, show=False)
+    ax = sc.pl.umap(adTemp, color=scn_classes, alpha=alpha, s=s, vmin=0, vmax=1, show=False)
     
     # Display or return the axis
     if display:

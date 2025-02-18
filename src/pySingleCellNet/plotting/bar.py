@@ -317,7 +317,8 @@ def stackedbar_composition_list(
     obs_column = 'SCN_class', 
     labels = None, 
     bar_width: float = 0.75, 
-    color_dict = None
+    color_dict = None,
+    legend_loc = "outside center right"
 ):
     """
     Plots a stacked bar chart of category proportions for a list of AnnData objects.
@@ -370,7 +371,8 @@ def stackedbar_composition_list(
         color_dict = adata_list[0].uns['SCN_class_colors'] # should parameterize this
 
     # Plotting
-    fig, ax = plt.subplots()
+    #### fig, ax = plt.subplots()
+    fig, ax = plt.subplots(constrained_layout=True)
     bottom = np.zeros(len(adata_list))
     for i, category in enumerate(categories):
         color = color_dict[category] if color_dict and category in color_dict else None
@@ -397,11 +399,12 @@ def stackedbar_composition_list(
     # Add legend
     legend_handles = [mpatches.Patch(color=color, label=label) for label, color in color_dict.items()]
     # legend = ax.legend(handles=legend_handles, bbox_to_anchor=(1.05, 1), loc='upper left', frameon=False)
-    legend = fig.legend(title='Classes', loc="outside right upper", frameon=False)
-    legend_height = legend.get_window_extent().height / fig.dpi  # in inches
+    ##### legend = fig.legend(title='Classes', loc="outside right upper", frameon=False)
+    fig.legend(handles=legend_handles, loc=legend_loc, frameon=False)
+    ##### legend_height = legend.get_window_extent().height / fig.dpi  # in inches
 
     # fig_height = fig.get_size_inches()[1]  # current height in inches
-    fig.set_size_inches(fig.get_size_inches()[0], legend_height )
+    #### fig.set_size_inches(fig.get_size_inches()[0], legend_height )
     # plt.tight_layout()
     # plt.show()
     return fig
