@@ -1,0 +1,8 @@
+sphinx
+sphinx-rtd-theme
+sphinx-autodoc-typehints
+sphinxcontrib-napoleon
+nbsphinx
+myst-nb
+sphinx-copybutton
+sphinx-book-theme

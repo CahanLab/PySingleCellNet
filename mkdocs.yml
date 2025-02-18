@@ -1,0 +1,77 @@
+site_name: pySingleCellNet
+site_author: Patrick Cahan
+copyright: Copyright &copy; 2024 Cahan Lab
+repo_url: https://github.com/CahanLab/PySingleCellNet
+
+use_directory_urls: false
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+
+theme:
+  name: material
+  font:
+    text: Noto Sans
+  palette:
+    primary: light blue
+  logo: img/logoGlow.png
+  favicon: img/logo.png
+  features:
+    - content.footnote.tooltips
+    - navigation.expand
+    - toc.integrate
+#    - navigation.tabs
+#    - navigation.tabs.sticky
+#    - navigation.sections
+
+markdown_extensions:
+  - md_in_html
+  - footnotes
+  - admonition
+  - attr_list
+  - tables
+  - def_list
+  - toc:
+      title: On this page
+  - pymdownx.blocks.caption
+  - pymdownx.tasklist:
+      custom_checkbox: false
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            separate_signature: true
+            docstring_section_style: list
+            heading_level: 3
+  - search
+  - mkdocs-jupyter:
+      execute: false
+      include_source: True
+
+nav:
+#  - Home: index.md
+  - Installation: install.md
+  - Tutorials: 
+    - 'Quickstart': notebooks/quickstart.ipynb
+    - 'Explore': notebooks/categorize.ipynb
+#    - 'train & classify': 'notebooks/Basics.ipynb'
+#    - 'analyze _in vitro_ cells': 'notebooks/explore.ipynb'
+#    - 'prepare training data': 'notebooks/how-to_prepare_reference_data.ipynb'
+#    - 'Train a classifier': 'notebooks/train_classifier.ipynb'
+#    - 'Enrichment analysis': 'notebooks/enrichment.ipynb'
+  - Training data: training_data.md
+  - References: refs.md
+  - API:
+    - 'Utility functions': 'utils.md'
+    - 'Classifier functions': 'classifier.md'
+    - 'Plotting functions': 'plotting.md'
+
+
