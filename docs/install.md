@@ -1,14 +1,15 @@
 PySingleCellnet depends on several packages, most of which can be installed with pip, and some are available in conda channels.
 
-### Prerequisites
+I recommend pre-installing the following:
 
-```python
-pip install pandas numpy sklearn scanpy statsmodels scipy matplotlib seaborn umap-learn
+```shell
+pip install scanpy python-igraph leidenalg
 ```
 
-### Installation
+Then, you should be able to install pySingleCellNet with PIP as follows:
 
-```python
-!pip install git+https://github.com/pcahan1/PySingleCellNet/
+```shell
+pip install git+https://github.com/CahanLab/pySingleCellNet.git
 ```
 
+This will install any remaining required packages, too

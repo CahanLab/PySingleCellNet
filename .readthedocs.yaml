@@ -6,7 +6,11 @@ build:
     python: "3"
   jobs:
     pre_install:
-      - pip install mkdocs-material mkdocstrings==0.27.0 mkdocs-jupyter mkdocstrings-python mkdocs-material-extensions
+      - pip install mkdocs 
+      - pip install mkdocs-material 
+      - pip install mkdocstrings-python 
+      - pip install mkdocs-jupyter
+      - pip install mkdocs-material-extensions
 
 mkdocs:
   configuration: mkdocs.yml
