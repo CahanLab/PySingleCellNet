@@ -6,9 +6,37 @@ import scanpy as sc
 import anndata as ad
 # from scipy.sparse import issparse
 # from alive_progress import alive_bar
+from scipy.stats import median_abs_deviation
 # import string
 import igraph as ig
 
+
+def detect_outliers(adata, metric = ["total_counts"], nmads = 5):
+    """
+    determines whether obs[metric] exceeds nmads 
+     
+    Parameters:
+    -----------
+    adata : AnnData
+        The input AnnData object containing single-cell data.
+    metric : str
+        The column name in `adata.obs` holding cell metric 
+    nmads : int, optional (default=5)
+        The number of median abs deviations to define a cell as an outlier
+
+    Returns
+    -------
+    None
+        The function adds a new column to `adata.obs` named "outlier_" + metric, but does not return anything.
+    """
+    M = adata.obs[metric]
+    outlier = (M < np.median(M) - nmads * median_abs_deviation(M)) | (
+        np.median(M) + nmads * median_abs_deviation(M) < M
+    )
+
+    new_col = "outlier_" + nmads + "_" + metric
+    adata.obs[new_col] = outlier
+    
 
 
 def filter_adata_by_group_size(adata: ad.AnnData, groupby: str, ncells: int = 20) -> ad.AnnData:
@@ -734,6 +762,250 @@ def sample_cells(
 
 
 
+
+def find_cells_that(adata, genes_thr_pres, all_conditions=True, layer=None):
+    """
+    Return cell IDs for cells that meet specified gene expression conditions.
+    
+    This function evaluates an AnnData object for a set of genes and checks, for each gene,
+    whether its expression satisfies a user-specified condition (either above a threshold for
+    presence or below a threshold for absence). The gene conditions are provided via the
+    `genes_thr_pres` parameter. The parameter `all_conditions` specifies whether a cell must
+    meet all of the gene conditions (if True) or at least a certain number of them (if an int
+    between 1 and the number of conditions). The function supports selecting data from a
+    specified layer (defaulting to adata.X if not provided).
+    
+    Args:
+        adata: AnnData object containing expression data. It is expected that adata.var_names 
+            contains the gene names and adata.obs_names contains the cell IDs.
+        genes_thr_pres (dict): A dictionary mapping gene symbols (str) to a tuple (threshold, present)
+            where threshold is a numeric value and present is a boolean. If present is True, the cell must have
+            expression > threshold for that gene; if False, the cell must have expression < threshold.
+        all_conditions (bool or int, optional): If True, all gene conditions must be met.
+            Alternatively, an integer between 1 and the number of genes in genes_thr_pres may be provided
+            to require that at least that many conditions are met. Defaults to True.
+        layer (str, optional): The name of the layer in adata to use for the expression data.
+            If None, adata.X is used. Defaults to None.
+    
+    Returns:
+        array-like: An array of cell IDs for cells that satisfy the specified gene conditions.
+    
+    Raises:
+        ValueError: If any gene in genes_thr_pres is not found in adata.var_names.
+        ValueError: If all_conditions is an integer not between 1 and the number of gene conditions.
+        ValueError: If all_conditions is neither a boolean nor an integer.
+        KeyError: If the specified layer does not exist in adata.layers.
+    """
+    import numpy as np
+    from scipy.sparse import issparse
+    
+    # Ensure every gene in genes_thr_pres exists in adata.var_names.
+    missing_genes = [gene for gene in genes_thr_pres if gene not in adata.var_names]
+    if missing_genes:
+        raise ValueError("The following genes are not found in adata.var_names: " + ", ".join(missing_genes))
+    
+    # Determine the number of required conditions.
+    n_conditions = len(genes_thr_pres)
+    if isinstance(all_conditions, bool):
+        n_required = n_conditions if all_conditions else 1
+    elif isinstance(all_conditions, int):
+        if 1 <= all_conditions <= n_conditions:
+            n_required = all_conditions
+        else:
+            raise ValueError("When provided as an int, all_conditions must be between 1 and the number of gene conditions")
+    else:
+        raise ValueError("all_conditions must be a boolean or an integer")
+    
+    # Extract the data for the genes.
+    gene_names = list(genes_thr_pres.keys())
+    if layer is None:
+        data_subset = adata[:, gene_names].X
+    else:
+        if layer not in adata.layers:
+            raise KeyError(f"Layer '{layer}' not found in adata.layers")
+        data_subset = adata[:, gene_names].layers[layer]
+    
+    # Initialize list to store boolean condition for each gene.
+    # Handle both sparse and dense matrices.
+    bool_conditions = []
+    if issparse(data_subset):
+        # Iterate over columns in the sparse matrix.
+        for i, gene in enumerate(gene_names):
+            threshold, present = genes_thr_pres[gene]
+            # Extract column as a sparse matrix and convert to dense array.
+            col_data = np.array(data_subset[:, i].todense()).flatten()
+            if present:
+                condition = col_data >= threshold
+            else:
+                condition = col_data < threshold
+            bool_conditions.append(condition)
+    else:
+        # If the data is dense.
+        # Ensure data_subset is 2D (this is relevant if only one gene is provided).
+        if data_subset.ndim == 1:
+            data_subset = data_subset.reshape(-1, 1)
+        for i, gene in enumerate(gene_names):
+            threshold, present = genes_thr_pres[gene]
+            col_data = data_subset[:, i]
+            if present:
+                condition = col_data >= threshold
+            else:
+                condition = col_data < threshold
+            bool_conditions.append(condition)
+    
+    # Combine the individual gene conditions into a boolean matrix of shape (n_cells, n_conditions).
+    bool_matrix = np.column_stack(bool_conditions)
+    # For each cell, count the number of conditions met.
+    conditions_met = np.sum(bool_matrix, axis=1)
+    cell_condition = conditions_met >= n_required
+    
+    # Return the cell IDs for cells that meet the overall condition.
+    selected_cell_ids = adata.obs_names[cell_condition]
+    return selected_cell_ids
+
+
+
+def find_knn_cells(adata, cell_ids, knn_key="connectivities", return_mode="union"):
+    """
+    Return an array of cell IDs that are among the k-nearest neighbors for the input cells.
+    
+    This function leverages the precomputed kNN graph stored in adata.obsp (e.g. from sc.pp.neighbors)
+    to retrieve the neighbors of each cell in cell_ids. By default, the function returns the union
+    of the neighbor sets for the input cells. Alternatively, if return_mode is set to "intersection",
+    only cells that appear in every input cell's kNN list are returned.
+    
+    Args:
+        adata: AnnData object that includes a kNN graph computed by Scanpy. The kNN graph should be stored in 
+            adata.obsp under the key specified by knn_key (default: "connectivities").
+        cell_ids (list or array-like): A list of cell IDs (matching adata.obs_names) for which to retrieve kNN cells.
+        knn_key (str, optional): The key in adata.obsp that holds the kNN graph (typically "connectivities" or "distances").
+            Defaults to "connectivities".
+        return_mode (str, optional): Mode for combining kNN sets from each input cell. Use "union" to return all cells 
+            that appear in at least one kNN list (default) or "intersection" to return only those cells that are present 
+            in every kNN list.
+    
+    Returns:
+        array-like: An array of cell IDs corresponding to the combined kNN cells based on the specified mode.
+    
+    Raises:
+        ValueError: If any cell in cell_ids is not found in adata.obs_names or if the kNN matrix is not sparse.
+        KeyError: If knn_key is not present in adata.obsp.
+    """
+    import numpy as np
+    from scipy.sparse import issparse
+    
+    # Check that each provided cell_id exists in adata.obs_names.
+    missing_cells = [cell for cell in cell_ids if cell not in adata.obs_names]
+    if missing_cells:
+        raise ValueError("The following cell ids are not in adata.obs_names: " + ", ".join(missing_cells))
+    
+    # Check that the specified knn_key exists in adata.obsp.
+    if knn_key not in adata.obsp:
+        raise KeyError(f"The key '{knn_key}' is not present in adata.obsp.")
+    
+    # Retrieve the kNN matrix.
+    knn_matrix = adata.obsp[knn_key]
+    if not issparse(knn_matrix):
+        raise ValueError(f"The kNN matrix at adata.obsp['{knn_key}'] is not a sparse matrix.")
+    
+    # Map cell_ids to their corresponding indices.
+    cell_indices = adata.obs_names.get_indexer(cell_ids)
+    
+    # For each input cell, get its kNN indices (nonzero entries in the corresponding row).
+    neighbor_sets = []
+    for idx in cell_indices:
+        row = knn_matrix.getrow(idx)
+        # row.indices holds the column indices with nonzero entries.
+        neighbor_sets.append(set(row.indices))
+    
+    # Combine neighbor sets according to the specified return_mode.
+    if return_mode == "union":
+        combined_indices = set().union(*neighbor_sets)
+    elif return_mode == "intersection":
+        # If neighbor_sets is empty, return an empty set.
+        combined_indices = set.intersection(*neighbor_sets) if neighbor_sets else set()
+    else:
+        raise ValueError("return_mode must be 'union' or 'intersection'")
+    
+    # Convert indices back to cell IDs.
+    result_cell_ids = adata.obs_names[list(combined_indices)]
+    
+    # add the seed cells, too
+    result_cell_ids = list(set(result_cell_ids).union(set(cell_ids)))
+    return result_cell_ids
+
+
+def group_cells_by_lists(adata, groups_dict, handle_overlap="new_group"):
+    """
+    Create a new AnnData object that includes only cells from the provided groups,
+    and add a new column in .obs indicating the group assignment for each cell.
+    
+    Each key in groups_dict corresponds to a group name and the associated value
+    is an array or list of cell IDs. A cell that appears in exactly one group is assigned
+    that group name. For cells that appear in more than one group, if handle_overlap is set to
+    "new_group" (the default), these cells are labeled as "overlap"; if set to "exclude",
+    these cells are not included in the output.
+    
+    Args:
+        adata: AnnData object with cell identifiers in adata.obs_names.
+        groups_dict (dict): Dictionary where keys are group names (str) and values are lists
+            or arrays of cell IDs.
+        handle_overlap (str, optional): How to handle cells that appear in more than one group.
+            Options are "new_group" (default) to assign them the label "overlap", or "exclude" 
+            to remove them. Defaults to "new_group".
+    
+    Returns:
+        AnnData: A new AnnData object containing only the cells that are present in one or more groups,
+            with an added column in .obs called "group" that indicates the group assignment.
+    
+    Raises:
+        ValueError: If any cell ID in groups_dict is not found in adata.obs_names.
+        ValueError: If handle_overlap is not "new_group" or "exclude".
+    """
+    # Validate handle_overlap parameter.
+    if handle_overlap not in ["new_group", "exclude"]:
+        raise ValueError("handle_overlap must be either 'new_group' or 'exclude'.")
+    
+    # Ensure that all cell IDs in groups_dict are found in adata.obs_names.
+    adata_cells = set(adata.obs_names)
+    for group_name, cell_list in groups_dict.items():
+        missing_cells = set(cell_list) - adata_cells
+        if missing_cells:
+            raise ValueError(
+                f"The following cells in group '{group_name}' are not found in adata.obs_names: {missing_cells}"
+            )
+    
+    # Build a mapping from cell ID to list of groups it belongs to.
+    cell_to_groups = {}
+    for group_name, cell_list in groups_dict.items():
+        for cell in cell_list:
+            cell_to_groups.setdefault(cell, []).append(group_name)
+    
+    # Determine group assignment for each cell.
+    # - If the cell appears in only one group, assign that group.
+    # - If it appears in multiple groups:
+    #      - if handle_overlap=="new_group", assign the label "overlap"
+    #      - if handle_overlap=="exclude", do not include that cell.
+    group_assignment = {}
+    for cell, group_list in cell_to_groups.items():
+        if len(group_list) == 1:
+            group_assignment[cell] = group_list[0]
+        else:
+            if handle_overlap == "new_group":
+                group_assignment[cell] = "overlap"
+            elif handle_overlap == "exclude":
+                # Exclude the cell by not assigning any group.
+                continue
+    
+    # Subset adata to only include cells that were assigned a group.
+    included_cells = list(group_assignment.keys())
+    new_adata = adata[included_cells].copy()
+    
+    # Add the group assignment as a new column in .obs.
+    new_adata.obs = new_adata.obs.copy()  # ensure a writable copy
+    new_adata.obs["group"] = [group_assignment[cell] for cell in new_adata.obs_names]
+    
+    return new_adata
 
 
 

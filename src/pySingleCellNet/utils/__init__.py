@@ -10,7 +10,8 @@ from .adataTools import (
     combine_pca_scores,
     build_knn_graph,
     filter_anndata_slots,
-    find_elbow
+    find_elbow,
+    
 )
 
 from .gene import (
@@ -21,7 +22,8 @@ from .gene import (
     pull_out_genes,
     pull_out_genes_v2,
     remove_genes,
-    limit_anndata_to_common_genes
+    limit_anndata_to_common_genes,
+    score_sex
 )
 
 from .cell import (

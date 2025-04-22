@@ -1,12 +1,9 @@
 import numpy as np
 import pandas as pd
-# from anndata import AnnData
-# import matplotlib.pyplot as plt
 import scanpy as sc
 import anndata as ad
+from typing import Dict, List, Optional
 from scipy.sparse import issparse
-# from alive_progress import alive_bar
-# import string
 import igraph as ig
 
 def rename_cluster_labels(
@@ -397,6 +394,4 @@ def find_elbow(
     # Index of the point with max distance to the line
     elbow_idx = np.argmax(dist_to_line)
     return elbow_idx
-
-
 

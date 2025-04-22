@@ -123,7 +123,7 @@ def filter_gene_list(genelist, min_genes, max_genes=1e6):
         Filtered dictionary with lists that have a length between min_genes and max_genes (inclusive of min_genes and max_genes).
     """
     filtered_dict = {key: value for key, value in genelist.items() if min_genes <= len(value) <= max_genes}
-    return filtered_dicts
+    return filtered_dict
 
 def annSetUp(species="mmusculus"):
     annot = sc.queries.biomart_annotations(species,["external_gene_name", "go_id"],)

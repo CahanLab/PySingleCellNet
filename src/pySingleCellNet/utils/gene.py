@@ -396,9 +396,67 @@ def get_Y_chr_genes(adata):
     return ygenes.index.tolist()
 
 
-
-
-
+def score_sex(
+    adata, 
+    y_genes=['Eif2s3y', 'Ddx3y', 'Uty'], 
+    x_inactivation_genes=['Xist', 'Tsix']
+):
+    """
+    Adds sex chromosome expression scores to an AnnData object.
+    
+    This function calculates two scores for each cell in a scRNA-seq AnnData object:
+      - Y_score: the sum of expression values for a set of Y-chromosome specific genes.
+      - X_inact_score: the sum of expression values for genes involved in X-chromosome inactivation.
+      
+    The scores are added to the AnnData object's `.obs` DataFrame with the keys 'Y_score' and 'X_inact_score'.
+    
+    Parameters
+    ----------
+    adata : AnnData
+        An AnnData object containing scRNA-seq data, with gene names in `adata.var_names`.
+    y_genes : list of str, optional
+        List of Y-chromosome specific marker genes (default is ['Eif2s3y', 'Ddx3y', 'Uty']).
+    x_inactivation_genes : list of str, optional
+        List of genes involved in X-chromosome inactivation (default is ['Xist', 'Tsix']).
+        
+    Raises
+    ------
+    ValueError
+        If none of the Y-specific or X inactivation genes are found in `adata.var_names`.
+    
+    Returns
+    -------
+    None
+        The function modifies the AnnData object in place by adding the score columns to `adata.obs`.
+    """
+    # Filter for genes that are available in the dataset.
+    available_y_genes = [gene for gene in y_genes if gene in adata.var_names]
+    available_x_genes = [gene for gene in x_inactivation_genes if gene in adata.var_names]
+    
+    if not available_y_genes:
+        raise ValueError("None of the Y-specific genes were found in the dataset.")
+    if not available_x_genes:
+        raise ValueError("None of the X inactivation genes were found in the dataset.")
+    
+    # Compute the sum of expression for the Y-specific genes.
+    y_expression = adata[:, available_y_genes].X
+    if hasattr(y_expression, "toarray"):
+        y_expression = y_expression.toarray()
+    adata.obs['Y_score'] = np.sum(y_expression, axis=1)
+    
+    # Compute the sum of expression for the X inactivation genes.
+    x_expression = adata[:, available_x_genes].X
+    if hasattr(x_expression, "toarray"):
+        x_expression = x_expression.toarray()
+    adata.obs['X_inact_score'] = np.sum(x_expression, axis=1)
+    
+    # Optionally, you could log some output:
+    print("Added 'Y_score' and 'X_inact_score' to adata.obs for {} cells.".format(adata.n_obs))
+    
+# Example usage:
+# Assuming 'adata' is your AnnData object:
+# add_sex_scores(adata)
+# print(adata.obs[['Y_score', 'X_inact_score']].head())
 
 
 

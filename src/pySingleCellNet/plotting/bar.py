@@ -6,21 +6,9 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import seaborn as sns
 import anndata as ad
-# from igraph import Graph
-# from palettable.colorbrewer.qualitative import Set2_6
-from palettable.tableau import GreenOrange_6
-# from palettable.cartocolors.qualitative import Safe_6
-# from palettable.cartocolors.qualitative import Vivid_4
-# from palettable.cartocolors.qualitative import Vivid_6
-# from palettable.cartocolors.qualitative import Vivid_10
-# from palettable.scientific.diverging import Roma_20
-# from palettable.scientific.sequential import LaJolla_20
-# from palettable.scientific.sequential import Batlow_20
 from anndata import AnnData
 from scipy.sparse import csr_matrix
 from sklearn.metrics import f1_score
-
-# from ..utils import *
 from pySingleCellNet.config import SCN_CATEGORY_COLOR_DICT
 from scipy.spatial.distance import pdist, squareform
 from scipy.cluster.hierarchy import linkage, leaves_list
@@ -97,6 +85,7 @@ def bar_compare_celltype_composition(adata1, adata2, celltype_col, min_delta, co
     plt.show()
 
 
+
 def stackedbar_composition(
     adata: AnnData, 
     groupby: str, 
@@ -106,7 +95,9 @@ def stackedbar_composition(
     color_dict=None, 
     ax=None,
     order_by_similarity: bool = False,
-    similarity_metric: str = 'correlation'
+    similarity_metric: str = 'correlation',
+    include_legend: bool = True,
+    legend_rows: int = 10
 ):
     """
     Plots a stacked bar chart of cell type proportions for a single AnnData object grouped by a specified column.
@@ -124,6 +115,8 @@ def stackedbar_composition(
         ax (matplotlib.axes.Axes, optional): The axis to plot on. If not provided, a new figure and axis will be created.
         order_by_similarity (bool, optional): Whether to order the bars by similarity in composition. Defaults to False.
         similarity_metric (str, optional): The metric to use for similarity ordering. Defaults to 'correlation'.
+        include_legend (bool, optional): Whether to include a legend in the plot. Defaults to True.
+        legend_rows (int, optional): The number of rows in the legend. Defaults to 10.
     
     Raises:
         ValueError: If the length of `labels` does not match the number of unique groups.
@@ -131,7 +124,7 @@ def stackedbar_composition(
     Examples:
         >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name')
         >>> fig, ax = plt.subplots()
-        >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name', ax=ax)
+        >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name', ax=ax, include_legend=False, legend_rows=5)
     """
     # Ensure the groupby column exists in .obs
     if groupby not in adata.obs.columns:
@@ -150,7 +143,7 @@ def stackedbar_composition(
         raise ValueError("Length of 'labels' must match the number of unique groups.")
     
     if color_dict is None:
-        color_dict = adata.uns['SCN_class_colors'] 
+        color_dict = adata.uns.get('SCN_class_colors', {})
     
     # Extracting category proportions per group
     category_counts = []
@@ -187,7 +180,7 @@ def stackedbar_composition(
     
     bottom = np.zeros(len(unique_groups))
     for i, category in enumerate(categories):
-        color = color_dict[category] if color_dict and category in color_dict else None
+        color = color_dict.get(category, None)
         ax.bar(
             range(len(unique_groups)), 
             proportions[i], 
@@ -204,7 +197,10 @@ def stackedbar_composition(
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_ylabel('Proportion')
     ax.set_title(f'{obs_column} proportions by {groupby}')
-    legend = ax.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    if include_legend:
+        num_columns = int(np.ceil(len(categories) / legend_rows))
+        ax.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left', ncol=num_columns)
     
     if ax is None:
         plt.tight_layout()
@@ -215,21 +211,21 @@ def stackedbar_composition(
 
 
 
-def stackedbar_composition_old(
+def stackedbar_composition3(
     adata: AnnData, 
     groupby: str, 
-    obs_column = 'SCN_class', 
-    labels = None, 
+    obs_column='SCN_class', 
+    labels=None, 
     bar_width: float = 0.75, 
-    color_dict = None
+    color_dict=None, 
+    ax=None,
+    order_by_similarity: bool = False,
+    similarity_metric: str = 'correlation',
+    include_legend: bool = True
 ):
     """
     Plots a stacked bar chart of cell type proportions for a single AnnData object grouped by a specified column.
-
-    This function takes an AnnData object, and for a specified column in the `.obs` attribute, it groups the data
-    and plots a stacked bar chart. Each bar represents a group with segments showing the proportion of each category
-    within that group.
-
+    
     Args:
         adata (anndata.AnnData): An AnnData object.
         groupby (str): The column in `.obs` to group by.
@@ -240,29 +236,38 @@ def stackedbar_composition_old(
         bar_width (float, optional): The width of the bars in the plot. Defaults to 0.75.
         color_dict (Dict[str, str], optional): A dictionary mapping categories to specific colors. If not provided,
             default colors will be used.
-
+        ax (matplotlib.axes.Axes, optional): The axis to plot on. If not provided, a new figure and axis will be created.
+        order_by_similarity (bool, optional): Whether to order the bars by similarity in composition. Defaults to False.
+        similarity_metric (str, optional): The metric to use for similarity ordering. Defaults to 'correlation'.
+        include_legend (bool, optional): Whether to include a legend in the plot. Defaults to True.
+    
     Raises:
         ValueError: If the length of `labels` does not match the number of unique groups.
-
-    Examples:
-        >>> plot_grouped_cell_type_proportions(adata, groupby='sample', obs_column='your_column_name')
-    """
     
+    Examples:
+        >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name')
+        >>> fig, ax = plt.subplots()
+        >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name', ax=ax, include_legend=False)
+    """
     # Ensure the groupby column exists in .obs
     if groupby not in adata.obs.columns:
         raise ValueError(f"The groupby column '{groupby}' does not exist in the .obs attribute.")
     
+    # Check if groupby column is categorical or not
+    if pd.api.types.is_categorical_dtype(adata.obs[groupby]):
+        unique_groups = adata.obs[groupby].cat.categories.to_list()
+    else:
+        unique_groups = adata.obs[groupby].unique().tolist()
+    
     # Extract unique groups and ensure labels are provided or create default ones
-    # unique_groups = adata.obs[groupby].unique()
-    unique_groups = adata.obs[groupby].cat.categories.to_list()
     if labels is None:
         labels = unique_groups
     elif len(labels) != len(unique_groups):
         raise ValueError("Length of 'labels' must match the number of unique groups.")
     
     if color_dict is None:
-        color_dict = adata.uns['SCN_class_colors'] 
-
+        color_dict = adata.uns.get('SCN_class_colors', {})
+    
     # Extracting category proportions per group
     category_counts = []
     categories = set()
@@ -281,11 +286,24 @@ def stackedbar_composition_old(
             j = categories.index(category)
             proportions[j, i] = counts[category]
     
+    # Ordering groups by similarity if requested
+    if order_by_similarity:
+        dist_matrix = pdist(proportions.T, metric=similarity_metric)
+        linkage_matrix = linkage(dist_matrix, method='average')
+        order = leaves_list(linkage_matrix)
+        proportions = proportions[:, order]
+        unique_groups = [unique_groups[i] for i in order]
+        labels = [labels[i] for i in order]
+    
     # Plotting
-    fig, ax = plt.subplots()
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
+    
     bottom = np.zeros(len(unique_groups))
     for i, category in enumerate(categories):
-        color = color_dict[category] if color_dict and category in color_dict else None
+        color = color_dict.get(category, None)
         ax.bar(
             range(len(unique_groups)), 
             proportions[i], 
@@ -302,14 +320,17 @@ def stackedbar_composition_old(
     ax.set_xticklabels(labels, rotation=45, ha="right")
     ax.set_ylabel('Proportion')
     ax.set_title(f'{obs_column} proportions by {groupby}')
-    #legend = ax.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
-    legend = fig.legend(title='Classes', loc="outside right upper", frameon=False)#, bbox_to_anchor=(1.05, 1), loc='upper left')
-    legend_height = legend.get_window_extent().height / fig.dpi  # in inches
-    fig_height = fig.get_size_inches()[1]  # current height in inches
-    fig.set_size_inches(fig.get_size_inches()[0], legend_height )
-    # plt.tight_layout()
-    # plt.show()
-    return fig
+    
+    if include_legend:
+        ax.legend(title='Classes', bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    if ax is None:
+        plt.tight_layout()
+        plt.show()
+    else:
+        return ax
+
+
 
 
 def stackedbar_composition_list(
