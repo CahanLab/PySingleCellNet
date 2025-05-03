@@ -12,73 +12,100 @@ import igraph as ig
 
 
 def cluster_subclusters(
-    adata,
+    adata: ad.AnnData,
     cluster_column: str = 'leiden',
+    cluster_name: str = None,
+    layer: str = 'counts',
     n_hvg: int = 2000,
     n_pcs: int = 40,
     n_neighbors: int = 10,
-    leiden_resolution: float = 0.25
-) -> sc.AnnData:
+    leiden_resolution: float = 0.25,
+    subcluster_col_name: str = 'subcluster'
+) -> None:
     """
-    For each original cluster in `adata.obs[cluster_column]`, recompute highly variable genes
-    (from the 'counts' layer, flavor='seurat_v3'), run PCA, build kNN, and re-cluster with Leiden.
-    Writes a new .obs column 'subcluster' whose labels are prefixed with the original cluster. Assumes that original counts are stored in layer['counts']
+    Subcluster a specified cluster (or all clusters) within an AnnData object by recomputing HVGs, PCA,
+    kNN graph, and Leiden clustering. Updates the AnnData object in-place, adding or updating
+    the `subcluster_col_name` column in `.obs` with new labels prefixed by the original cluster.
     
-    Parameters
-    ----------
-    adata
-        Input AnnData with a pre-existing clustering in `adata.obs[cluster_column]`.
-    cluster_column
-        `.obs` column name holding the original cluster assignment.
-    n_hvg
-        Number of highly variable genes per original cluster.
-    n_pcs
-        Number of PCs to compute.
-    n_neighbors
-        Number of neighbors for kNN graph.
-    leiden_resolution
-        Resolution parameter passed to `sc.tl.leiden`.
+    Args:
+        adata: AnnData
+            The AnnData object containing precomputed clusters in `.obs[cluster_column]`.
+        cluster_column: str, optional
+            Name of the `.obs` column holding the original cluster assignments. Default is 'leiden'.
+        cluster_name: str or None, optional
+            Specific cluster label to subcluster. If `None`, applies to all clusters. Default is None.
+        layer: str, optional
+            Layer name in `adata.layers` to use for HVG detection. Default is 'counts'.
+        n_hvg: int, optional
+            Number of highly variable genes to select per cluster. Default is 2000.
+        n_pcs: int, optional
+            Number of principal components to compute. Default is 40.
+        n_neighbors: int, optional
+            Number of neighbors for the kNN graph. Default is 10.
+        leiden_resolution: float, optional
+            Resolution parameter for Leiden clustering. Default is 0.25.
+        subcluster_col_name: str, optional
+            Name of the `.obs` column to store subcluster labels. Default is 'subcluster'.
     
-    Returns
-    -------
-    None.
-        Populates .obs['subcluster']
+    Raises:
+        ValueError: If `cluster_column` not in `adata.obs`.
+        ValueError: If `layer` not in `adata.layers`.
+        ValueError: If `cluster_name` is specified but not found in `adata.obs[cluster_column]`.
     """
-    # keep a copy of the original
+    # Error checking
+    if cluster_column not in adata.obs:
+        raise ValueError(f"Cluster column '{cluster_column}' not found in adata.obs")
+    if layer not in adata.layers:
+        raise ValueError(f"Layer '{layer}' not found in adata.layers")
+    
+    # Convert original clusters to string
     adata.obs['original_cluster'] = adata.obs[cluster_column].astype(str)
     
-    # prepare the column
-    adata.obs['subcluster'] = None
+    # Ensure subcluster column exists
+    adata.obs[subcluster_col_name] = ""
     
-    for orig in adata.obs['original_cluster'].unique():
+    # Validate cluster_name
+    unique_clusters = adata.obs['original_cluster'].unique()
+    if cluster_name is not None:
+        if str(cluster_name) not in unique_clusters:
+            raise ValueError(
+                f"Cluster '{cluster_name}' not found in adata.obs['{cluster_column}']"
+            )
+        clusters_to_process = [str(cluster_name)]
+    else:
+        clusters_to_process = unique_clusters
+    
+    # Iterate and subcluster
+    for orig in clusters_to_process:
         mask = adata.obs['original_cluster'] == orig
         sub = adata[mask].copy()
         
-        # 1) HVG
+        # 1) Compute HVGs
         sc.pp.highly_variable_genes(
             sub,
             flavor='seurat_v3',
             n_top_genes=n_hvg,
-            layer='counts'
+            layer=layer
         )
+        
         # 2) PCA
         sc.pp.pca(sub, n_comps=n_pcs, use_highly_variable=True)
+        
         # 3) kNN
         sc.pp.neighbors(sub, n_neighbors=n_neighbors, use_rep='X_pca')
+        
         # 4) Leiden
         sc.tl.leiden(
             sub,
             resolution=leiden_resolution,
             flavor='igraph',
-            n_iterations=2
+            n_iterations=2,
+            key_added='leiden_sub'
         )
         
-        # build labels like "2_0", "2_1", etc.
-        prefixed = orig + "_" + sub.obs['leiden'].astype(str)
-        adata.obs.loc[mask, 'subcluster'] = prefixed.values
-    
-    return adata
-
+        # Prefix and assign back
+        labels = (orig + "_" + sub.obs['leiden_sub'].astype(str)).values
+        adata.obs.loc[mask, subcluster_col_name] = labels
 
 
 

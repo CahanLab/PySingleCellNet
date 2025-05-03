@@ -26,6 +26,7 @@ from .gene import (
 )
 
 from .cell import (
+    cluster_subclusters,
     filter_adata_by_group_size,
     rename_cluster_labels,
     assign_optimal_cluster,
@@ -67,6 +68,8 @@ __all__ = [
     "pull_out_genes_v2",
     "remove_genes",
     "limit_anndata_to_common_genes",
+    "score_sex",
+    "cluster_subclusters",
     "filter_adata_by_group_size",
     "rename_cluster_labels",
     "assign_optimal_cluster",
