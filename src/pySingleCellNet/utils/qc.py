@@ -142,7 +142,7 @@ def mito_rib_heme(adQ: AnnData,
 
 
 
-def mito_rib(adQ: AnnData, species: str = "MM", clean: bool = True) -> AnnData:
+def mito_rib(adQ: AnnData, species: str = "MM", log1p = True, clean: bool = True) -> AnnData:
     """
     Calculate mitochondrial and ribosomal QC metrics and add them to the `.var` attribute of the AnnData object.
 
@@ -180,7 +180,7 @@ def mito_rib(adQ: AnnData, species: str = "MM", clean: bool = True) -> AnnData:
         adata,
         qc_vars=['ribo', 'mt'],
         percent_top=None,
-        log1p=False,
+        log1p=log1p,
         inplace=True
     )
 

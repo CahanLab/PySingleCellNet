@@ -11,7 +11,6 @@ from .adataTools import (
     build_knn_graph,
     filter_anndata_slots,
     find_elbow,
-    
 )
 
 from .gene import (
@@ -32,7 +31,8 @@ from .cell import (
     assign_optimal_cluster,
     reassign_selected_clusters,
     split_adata_indices,
-    sort_obs_table
+    sort_obs_table,
+    detect_outliers
 )
 
 

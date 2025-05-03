@@ -11,6 +11,77 @@ from scipy.stats import median_abs_deviation
 import igraph as ig
 
 
+def cluster_subclusters(
+    adata,
+    cluster_column: str = 'leiden',
+    n_hvg: int = 2000,
+    n_pcs: int = 40,
+    n_neighbors: int = 10,
+    leiden_resolution: float = 0.25
+) -> sc.AnnData:
+    """
+    For each original cluster in `adata.obs[cluster_column]`, recompute highly variable genes
+    (from the 'counts' layer, flavor='seurat_v3'), run PCA, build kNN, and re-cluster with Leiden.
+    Writes a new .obs column 'subcluster' whose labels are prefixed with the original cluster. Assumes that original counts are stored in layer['counts']
+    
+    Parameters
+    ----------
+    adata
+        Input AnnData with a pre-existing clustering in `adata.obs[cluster_column]`.
+    cluster_column
+        `.obs` column name holding the original cluster assignment.
+    n_hvg
+        Number of highly variable genes per original cluster.
+    n_pcs
+        Number of PCs to compute.
+    n_neighbors
+        Number of neighbors for kNN graph.
+    leiden_resolution
+        Resolution parameter passed to `sc.tl.leiden`.
+    
+    Returns
+    -------
+    None.
+        Populates .obs['subcluster']
+    """
+    # keep a copy of the original
+    adata.obs['original_cluster'] = adata.obs[cluster_column].astype(str)
+    
+    # prepare the column
+    adata.obs['subcluster'] = None
+    
+    for orig in adata.obs['original_cluster'].unique():
+        mask = adata.obs['original_cluster'] == orig
+        sub = adata[mask].copy()
+        
+        # 1) HVG
+        sc.pp.highly_variable_genes(
+            sub,
+            flavor='seurat_v3',
+            n_top_genes=n_hvg,
+            layer='counts'
+        )
+        # 2) PCA
+        sc.pp.pca(sub, n_comps=n_pcs, use_highly_variable=True)
+        # 3) kNN
+        sc.pp.neighbors(sub, n_neighbors=n_neighbors, use_rep='X_pca')
+        # 4) Leiden
+        sc.tl.leiden(
+            sub,
+            resolution=leiden_resolution,
+            flavor='igraph',
+            n_iterations=2
+        )
+        
+        # build labels like "2_0", "2_1", etc.
+        prefixed = orig + "_" + sub.obs['leiden'].astype(str)
+        adata.obs.loc[mask, 'subcluster'] = prefixed.values
+    
+    return adata
+
+
+
+
 def detect_outliers(adata, metric = ["total_counts"], nmads = 5):
     """
     determines whether obs[metric] exceeds nmads 
