@@ -16,6 +16,7 @@ from .adataTools import (
 from .gene import (
     score_gene_modules,
     find_knn_modules,
+    what_module_has_gene,
     extract_top_bottom_genes,
     rank_genes_subsets,
     pull_out_genes,

@@ -109,6 +109,20 @@ def find_knn_modules(
     adata.uns['knn_modules'] = modules
 
 
+def what_module_has_gene(
+    adata,
+    target_gene,
+    mod_slot='knn_modules'
+) -> list: 
+    if mod_slot not in adata.uns.keys():
+        raise ValueError(mod_slot + " have not been identified.")
+    genemodules = adata.uns[mod_slot]
+    return [key for key, genes in genemodules.items() if target_gene in genes]
+
+
+
+
+
 
 
 def extract_top_bottom_genes(
