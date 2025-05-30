@@ -92,7 +92,8 @@ def find_knn_modules(
     n_pcs = elbow + npcs_adjust
 
     # Compute the kNN graph using correlation as the metric
-    sc.pp.neighbors(adata_transposed, n_neighbors=knn, n_pcs=n_pcs, metric='correlation')
+    # sc.pp.neighbors(adata_transposed, n_neighbors=knn, n_pcs=n_pcs, metric='correlation')
+    sc.pp.neighbors(adata_transposed, n_neighbors=knn, n_pcs=n_pcs, metric='euclidean')
     
     # Perform Leiden clustering with an explicit resolution keyword
     sc.tl.leiden(adata_transposed, resolution=leiden_resolution)

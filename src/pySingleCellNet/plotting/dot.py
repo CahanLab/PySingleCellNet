@@ -19,8 +19,108 @@ from palettable.scientific.sequential import LaJolla_20
 from palettable.scientific.sequential import Batlow_20
 from anndata import AnnData
 from scipy.sparse import csr_matrix
-from sklearn.metrics import f1_score
+from scipy import sparse
+from typing import Optional, Callable
 from ..utils import *
+
+from scipy import sparse
+from typing import Optional, Callable
+
+def spatial_two_genes(
+    adata: AnnData,
+    gene1: str,
+    gene2: str,
+    title: Optional[str] = None,
+    scale_max_value: float = 2.0,
+    spot_size: float = 35,
+    cmap: str = 'RdBu_r',
+    alpha: float = 0.5,
+    copy_adata: bool = True,
+    combine_fun: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None,
+    **plot_kwargs
+) -> None:
+    """Plot a custom combination of two gene expressions on a spatial scatter,
+    scaling only those two genes.
+
+    This will (optionally) make a copy of your AnnData, extract expression for
+    gene1 and gene2, scale each gene vector (zero‐center, unit variance,
+    clipped to ±scale_max_value), compute a per‐cell combined metric, store it
+    in `.obs[title]`, and then call `sc.pl.spatial`.
+
+    Args:
+        adata: AnnData with spatial coords and expression in `.X` (or `.layers`).
+        gene1: Name of the first gene (must be in `adata.var_names`).
+        gene2: Name of the second gene.
+        title: Key under which to store the combined metric in `adata.obs` and
+            plot title. Defaults to `"gene1_gene2"`.
+        scale_max_value: Maximum absolute value to clip the scaled gene vectors.
+            Defaults to 2.0.
+        spot_size: Passed to `sc.pl.spatial(..., spot_size=...)`. Default 35.
+        cmap: Colormap for `sc.pl.spatial`. Default `'RdBu_r'`.
+        alpha: Spot transparency for `sc.pl.spatial`. Default 0.5.
+        copy_adata: If True, operate on a copy. Otherwise overwrite `adata.obs`.
+        combine_fun: Function `(g1, g2) -> combined`. If None, uses
+            `(g1 * g2) + g1 - g2`.
+        **plot_kwargs: Any additional args forwarded to `sc.pl.spatial`.
+
+    Returns:
+        None. Displays a spatial scatter of the combined metric.
+    """
+    # determine obs key / title
+    if title is None:
+        title = f"{gene1}_{gene2}"
+
+    # copy or in-place
+    ad = adata.copy() if copy_adata else adata
+
+    # extract raw expression
+    X1 = ad[:, gene1].X
+    X2 = ad[:, gene2].X
+
+    # to 1D numpy arrays
+    def to_array(mat):
+        if sparse.issparse(mat):
+            arr = mat.A.flatten()
+        else:
+            arr = np.asarray(mat).flatten()
+        return arr
+
+    g1 = to_array(X1)
+    g2 = to_array(X2)
+
+    # scale each gene individually
+    def scale_vec(x):
+        m = x.mean()
+        s = x.std(ddof=0)
+        if s == 0:
+            # avoid divide by zero
+            scaled = x - m
+        else:
+            scaled = (x - m) / s
+        return np.clip(scaled, -scale_max_value, scale_max_value)
+
+    g1_scaled = scale_vec(g1)
+    g2_scaled = scale_vec(g2)
+
+    # combine
+    if combine_fun is None:
+        expr = (g1_scaled * g2_scaled) + g1_scaled - g2_scaled
+    else:
+        expr = combine_fun(g1_scaled, g2_scaled)
+
+    # store and plot
+    ad.obs[title] = pd.Series(expr, index=ad.obs.index)
+    sc.pl.spatial(
+        ad,
+        color=title,
+        spot_size=spot_size,
+        cmap=cmap,
+        alpha=alpha,
+        **plot_kwargs
+    )
+
+
+
 
 def umi_counts_ranked(adata, total_counts_column="total_counts"):
     """
