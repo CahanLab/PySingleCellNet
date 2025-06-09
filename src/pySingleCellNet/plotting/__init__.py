@@ -1,3 +1,7 @@
+from .helpers import (
+    make_bivariate_cmap
+)
+
 from .bar import (
     bar_compare_celltype_composition,
     stackedbar_composition,
@@ -7,7 +11,12 @@ from .bar import (
     bar_classifier_f1,
 )
 
-from .dot import (
+from .spatial import (
+    spatial_contours,
+    spatial_two_genes
+)
+
+from .dot import (    
     umi_counts_ranked,
     ontogeny_graph,
     dotplot_deg,
@@ -29,6 +38,10 @@ from .scatter import (
 
 # API
 __all__ = [
+    "scatter_genes_oneper",
+    "spatial_contours",
+    "make_bivariate_cmap",
+    "spatial_two_genes",
     "bar_compare_celltype_composition",
     "stackedbar_composition",
     "stackedbar_composition_list",

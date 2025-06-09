@@ -5,6 +5,7 @@ from .qc import (
 )
 
 from .adataTools import (
+    impute_knn_dropout,
     rename_cluster_labels,
     generate_joint_graph,
     combine_pca_scores,
@@ -14,6 +15,8 @@ from .adataTools import (
 )
 
 from .gene import (
+    build_gene_knn_graph,
+    query_gene_neighbors,
     score_gene_modules,
     find_knn_modules,
     what_module_has_gene,
@@ -50,8 +53,23 @@ from .colors import (
     get_unique_colors
 )
 
+from .spatial import (
+    rotate_spatial_coordinates,
+    flip_spatial_coordinates,
+    annotate_spatially_variable_genes,
+    compute_contour_profiles,
+    annotate_axis_association,
+)
+
 # API
 __all__ = [
+    "build_gene_knn_graph",
+    "query_gene_neighbors",
+    "rotate_spatial_coordinates",
+    "flip_spatial_coordinates",
+    "annotate_spatially_variable_genes",
+    "compute_contour_profiles",
+    "annotate_axis_association",
     "find_knee_point",
     "mito_rib",
     "mito_rib_heme",

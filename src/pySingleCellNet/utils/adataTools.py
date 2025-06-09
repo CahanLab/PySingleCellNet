@@ -5,6 +5,96 @@ import anndata as ad
 from typing import Dict, List, Optional
 from scipy.sparse import issparse
 import igraph as ig
+import scipy.sparse as sp
+
+import scipy.sparse as sp
+
+def impute_knn_dropout(
+    adata,
+    knn_key: str = "neighbors",
+    layer_name: str = None
+):
+    """
+    Impute zero‐expression values in `adata.X` (or `adata.raw.X`) by replacing each
+    zero with the weighted mean of that gene over its kNN, where weights come from
+    `adata.obsp[f"{knn_key}_connectivities"]`.
+
+    Parameters
+    ----------
+    adata
+        Annotated data matrix. We will read from `adata.raw.X` if it exists;
+        otherwise from `adata.X`.
+    knn_key
+        Prefix for the two sparse matrices in `adata.obsp`:
+          - `adata.obsp[f"{knn_key}_connectivities"]`
+          - `adata.obsp[f"{knn_key}_distances"]`
+        In Scanpy’s `pp.neighbors(..., key_added=knn_key)`, you get exactly those two names.
+    layer_name
+        Name for the new layer to which the imputed expression matrix will be saved.
+        If None, defaults to `f"{knn_key}_imputed"`.
+
+    Returns
+    -------
+    adata
+        The same AnnData, with an extra entry:
+        `adata.layers[layer_name]` = the imputed expression matrix (sparse if original was sparse).
+    """
+
+    # 1) Extract the “raw” or primary X matrix
+    if hasattr(adata, "raw") and adata.raw is not None and adata.raw.X is not None:
+        Xorig = adata.raw.X
+    else:
+        Xorig = adata.X
+
+    # Convert to dense numpy for easy indexing/arithmetic
+    was_sparse = sp.issparse(Xorig)
+    X = Xorig.toarray() if was_sparse else Xorig.copy()
+
+    # 2) Grab the connectivities matrix from adata.obsp
+    conn_key = f"{knn_key}_connectivities"
+    if conn_key not in adata.obsp:
+        raise KeyError(
+            f"No key '{conn_key}' found in adata.obsp. "
+            f"Did you run `sc.pp.neighbors(adata, key_added='{knn_key}')`?"
+        )
+
+    C = adata.obsp[conn_key].tocsr()  # shape = (n_cells, n_cells), sparse
+
+    # 3) Row‐normalize C so that each row sums to 1 (for weighted averaging)
+    #    If a row already sums to zero (no neighbors—rare after pp.neighbors), we leave it zero.
+    row_sums = np.array(C.sum(axis=1)).flatten()  # length = n_cells
+    # Avoid division‐by‐zero:
+    inv_row = np.zeros_like(row_sums)
+    nonzero_mask = row_sums > 0
+    inv_row[nonzero_mask] = 1.0 / row_sums[nonzero_mask]
+    D_inv = sp.diags(inv_row)          # diagonal matrix of 1/(row_sums)
+
+    W = D_inv.dot(C)  # now each row of W sums to 1 (except rows that were originally all zero)
+
+    # 4) Compute the kNN‐weighted mean for every cell+gene:
+    #    X_knn[i, g] = sum_j W[i, j] * X[j, g]
+    X_knn = W.dot(X)  # shape = (n_cells, n_genes)
+
+    # 5) Replace zeros in X with weighted neighbor means
+    mask_zero = (X == 0)
+    X_imputed = X.copy()
+    X_imputed[mask_zero] = X_knn[mask_zero]
+
+    # 6) Write the result into a new layer
+    if layer_name is None:
+        layer_name = f"{knn_key}_imputed"
+
+    if was_sparse:
+        adata.layers[layer_name] = sp.csr_matrix(X_imputed)
+    else:
+        adata.layers[layer_name] = X_imputed
+
+    return adata
+
+
+
+
+
 
 def rename_cluster_labels(
     adata: ad,AnnData,

@@ -1,12 +1,221 @@
 import numpy as np
 import pandas as pd
-# from anndata import AnnData
 import scanpy as sc
 import anndata as ad
+from scipy import sparse
 # import string
 import igraph as ig
 from typing import Dict, List
 from .adataTools import find_elbow
+
+from typing import Union
+from anndata import AnnData
+
+import scanpy as sc
+import numpy as np
+from scipy import sparse
+
+def build_gene_knn_graph(
+    adata,
+    mask_var: str = None,
+    mean_cluster: bool = True,
+    groupby: str = 'leiden',
+    knn: int = 5,
+    use_knn: bool = True,
+    metric: str = "euclidean",
+    key: str = "gene"
+):
+    """
+    Compute a gene–gene kNN graph (hard or Gaussian‑weighted) and store sparse connectivities & distances in adata.uns.
+
+    Parameters
+    ----------
+    adata
+        AnnData object (cells × genes). Internally transposed to (genes × cells).
+    mask_var
+        If not None, must be a column name in adata.var of boolean values.
+        Only genes where adata.var[mask_var] == True are included. If None, use all genes.
+    mean_cluster
+        If True, aggregate cells by cluster defined in adata.obs[groupby].
+        The kNN graph is computed on the mean‑expression profiles of each cluster
+        (genes × n_clusters) rather than genes × n_cells.
+    groupby
+        Column in adata.obs holding cluster labels. Only used if mean_cluster=True.
+    knn
+        Integer: how many neighbors per gene to consider.
+        Passed as n_neighbors=knn to sc.pp.neighbors.
+    use_knn
+        Boolean: passed to sc.pp.neighbors as knn=use_knn. 
+        - If True, builds a hard kNN graph (only k nearest neighbors).  
+        - If False, uses a Gaussian kernel to weight up to the k-th neighbor.
+    metric
+        Distance metric for kNN computation (e.g. "euclidean", "manhattan", "correlation", etc.).
+        If metric=="correlation" and the gene‑expression matrix is sparse, it will be converted to dense.
+    key
+        Prefix under which to store results in adata.uns. The function sets:
+          - adata.uns[f"{key}_gene_index"]
+          - adata.uns[f"{key}_connectivities"]
+          - adata.uns[f"{key}_distances"]
+    """
+    # 1) Work on a shallow copy so we don’t overwrite adata.X prematurely
+    adata_work = adata.copy()
+
+    # 2) If mask_var is provided, subset to only those genes first
+    if mask_var is not None:
+        if mask_var not in adata_work.var.columns:
+            raise ValueError(f"Column '{mask_var}' not found in adata.var.")
+        gene_mask = adata_work.var[mask_var].astype(bool)
+        selected_genes = adata_work.var.index[gene_mask].tolist()
+        if len(selected_genes) == 0:
+            raise ValueError(f"No genes found where var['{mask_var}'] is True.")
+        adata_work = adata_work[:, selected_genes].copy()
+
+    # 3) If mean_cluster=True, aggregate by cluster label in `groupby`
+    if mean_cluster:
+        if groupby not in adata_work.obs.columns:
+            raise ValueError(f"Column '{groupby}' not found in adata.obs.")
+        # Aggregate each cluster to its mean expression; stored in .layers['mean']
+        adata_work = sc.get.aggregate(adata_work, by=groupby, func='mean')
+        # Overwrite .X with the mean‑expression matrix
+        adata_work.X = adata_work.layers['mean']
+
+    # 4) Transpose so that each gene (or cluster‑mean) is one “observation”
+    adata_genes = adata_work.T.copy()
+
+    # 5) If metric=="correlation" and X is sparse, convert to dense
+    if metric == "correlation" and sparse.issparse(adata_genes.X):
+        adata_genes.X = adata_genes.X.toarray()
+
+    # 6) Compute neighbors on the (genes × [cells or clusters]) matrix.
+    #    Pass n_neighbors=knn and knn=use_knn. Default method selection in Scanpy will
+    #    use 'umap' if use_knn=True, and 'gauss' if use_knn=False.
+    sc.pp.neighbors(
+        adata_genes,
+        n_neighbors=knn,
+        knn=use_knn,
+        metric=metric,
+        use_rep="X"
+    )
+
+    # 7) Extract the two sparse matrices from adata_genes.obsp:
+    conn = adata_genes.obsp["connectivities"].copy()  # CSR: gene–gene adjacency weights
+    dist = adata_genes.obsp["distances"].copy()       # CSR: gene–gene distances
+
+    # 8) Record the gene‑order (after masking + optional aggregation)
+    gene_index = np.array(adata_genes.obs_names)
+
+    adata.uns[f"{key}_gene_index"]      = gene_index
+    adata.uns[f"{key}_connectivities"] = conn
+    adata.uns[f"{key}_distances"]      = dist
+
+
+def query_gene_neighbors(
+    adata,
+    gene: str,
+    n_neighbors: int = 5,
+    key: str = "gene",
+    use: str = "connectivities"
+):
+    """
+    Retrieve the top `n_neighbors` nearest genes to `gene`, using a precomputed gene–gene kNN graph
+    stored in adata.uns (as produced by build_gene_knn_graph).
+
+    This version handles both sparse‐CSR matrices and dense NumPy arrays in adata.uns.
+
+    Parameters
+    ----------
+    adata
+        AnnData that has the following keys in adata.uns:
+          - adata.uns[f"{key}_gene_index"]      (np.ndarray of gene names, in order)
+          - adata.uns[f"{key}_connectivities"]  (CSR sparse matrix or dense ndarray)
+          - adata.uns[f"{key}_distances"]       (CSR sparse matrix or dense ndarray)
+    gene
+        Gene name (must appear in `adata.uns[f"{key}_gene_index"]`).
+    n_neighbors
+        Number of neighbors to return.
+    key
+        Prefix under which the kNN graph was stored. For example, if build_gene_knn_graph(...)
+        was called with `key="gene"`, the function will look for:
+          - adata.uns["gene_gene_index"]
+          - adata.uns["gene_connectivities"]
+          - adata.uns["gene_distances"]
+    use
+        One of {"connectivities", "distances"}.  
+        - If "connectivities", neighbors are ranked by descending connectivity weight.  
+        - If "distances", neighbors are ranked by ascending distance (only among nonzero entries).
+
+    Returns
+    -------
+    neighbors : List[str]
+        A list of gene names (length ≤ n_neighbors) that are closest to `gene`.
+    """
+    if use not in ("connectivities", "distances"):
+        raise ValueError("`use` must be either 'connectivities' or 'distances'.")
+
+    idx_key = f"{key}_gene_index"
+    conn_key = f"{key}_connectivities"
+    dist_key = f"{key}_distances"
+
+    if idx_key not in adata.uns:
+        raise ValueError(f"Could not find `{idx_key}` in adata.uns.")
+    if conn_key not in adata.uns or dist_key not in adata.uns:
+        raise ValueError(f"Could not find `{conn_key}` or `{dist_key}` in adata.uns.")
+
+    gene_index = np.array(adata.uns[idx_key])
+    if gene not in gene_index:
+        raise KeyError(f"Gene '{gene}' not found in {idx_key}.")
+    i = int(np.where(gene_index == gene)[0][0])
+
+    # Select the appropriate stored matrix (could be sparse CSR or dense ndarray)
+    mat_key = conn_key if use == "connectivities" else dist_key
+    stored = adata.uns[mat_key]
+
+    # If stored is a NumPy array, treat it as a dense full matrix:
+    if isinstance(stored, np.ndarray):
+        row_vec = stored[i].copy()
+        # Exclude self
+        if use == "connectivities":
+            row_vec[i] = -np.inf
+            order = np.argsort(-row_vec)  # descending
+        else:
+            row_vec[i] = np.inf
+            order = np.argsort(row_vec)   # ascending
+        topk = order[:n_neighbors]
+        return [gene_index[j] for j in topk]
+
+    # Otherwise, assume stored is a sparse matrix (CSR or similar):
+    if not sparse.issparse(stored):
+        raise TypeError(f"Expected CSR or ndarray for `{mat_key}`, got {type(stored)}.")
+
+    row = stored.getrow(i)
+    # For connectivities: sort nonzero entries by descending weight
+    if use == "connectivities":
+        cols = row.indices
+        weights = row.data
+        mask = cols != i
+        cols = cols[mask]
+        weights = weights[mask]
+        if weights.size == 0:
+            return []
+        order = np.argsort(-weights)
+        topk = cols[order][:n_neighbors]
+        return [gene_index[j] for j in topk]
+
+    # For distances: sort nonzero entries by ascending distance
+    else:  # use == "distances"
+        cols = row.indices
+        dists = row.data
+        mask = cols != i
+        cols = cols[mask]
+        dists = dists[mask]
+        if dists.size == 0:
+            return []
+        order = np.argsort(dists)
+        topk = cols[order][:n_neighbors]
+        return [gene_index[j] for j in topk]
+
+
+
 
 def score_gene_modules(
     adata,
@@ -30,84 +239,88 @@ def score_gene_modules(
     obsm_name = key_added
     adata.obsm[obsm_name] = scores_df
 
+
+
 def find_knn_modules(
     adata,
     mean_cluster: bool = True,
     groupby: str = 'leiden',
-    use_hvg: bool = True,
+    mask_var: str = None,
     knn: int = 5,
     leiden_resolution: float = 0.5,
     prefix: str = 'gmod_',
-    npcs_adjust: int = 1
+    metric='euclidean'
 ):
     """
-    Finds gene modules using k-nearest neighbors on PCA-reduced data and stores the modules in adata.uns['knn_modules'].
+    Finds gene modules by building a kNN graph on raw (or aggregated) expression profiles 
+    and clustering with Leiden. Results are written to adata.uns['knn_modules'] in-place.
 
     Parameters:
-    - adata: AnnData object to process.
-    - mean_cluster: If True, compute the mean expression per cluster defined in `groupby`.
-    - groupby: Column in adata.obs to use for clustering when mean_cluster is True.
-    - use_hvg: If True, subset the data to highly variable genes (adata.var['highly_variable'] must exist).
-    - knn: Number of neighbors to use in the kNN graph.
-    - leiden_resolution: Resolution parameter for the Leiden clustering.
-    - prefix: Prefix to add to each module name.
-    - npcs_adjust: Additional PCs to add to the elbow estimate.
-    
-    Returns:
-    - Updated adata object with 'knn_modules' stored in adata.uns.
+    -----------
+    adata
+        AnnData object to process.
+    mean_cluster
+        If True, compute the mean expression per cluster defined in `groupby`, otherwise use all cells.
+    groupby
+        Column in adata.obs to use for clustering when mean_cluster is True.
+    mask_var
+        Column name in adata.var used to select a subset of genes (boolean mask). If None, use all genes.
+    knn
+        Number of neighbors to use in the kNN graph.
+    leiden_resolution
+        Resolution parameter for the Leiden clustering.
+    prefix
+        Prefix to add to each module name.
+    metric
+        Distance metric for kNN computation (e.g. 'euclidean', 'manhattan', 'correlation', etc.).
+        If metric=='correlation', we force a dense array when the data are sparse.
     """
-    # Work on a copy to avoid modifying the original object
+    # 1) Work on a copy so we don’t modify the user’s adata.X before we’re ready
     adata_subset = adata.copy()
 
-    # If using highly variable genes, verify the flag exists and subset accordingly.
-    if use_hvg:
-        if 'highly_variable' not in adata_subset.var.columns:
-            raise ValueError("'highly_variable' column not found in adata.var.")
-        hvg_names = adata_subset.var.index[adata_subset.var['highly_variable']].tolist()
-        if not hvg_names:
-            raise ValueError("No highly variable genes found in adata.var.")
-        adata_subset = adata_subset[:, hvg_names].copy()
+    # 2) If mask_var is provided, subset on that boolean column in adata.var
+    if mask_var is not None:
+        if mask_var not in adata_subset.var.columns:
+            raise ValueError(f"Column '{mask_var}' not found in adata.var.")
+        gene_mask = adata_subset.var[mask_var].astype(bool)
+        selected = adata_subset.var.index[gene_mask].tolist()
+        if len(selected) == 0:
+            raise ValueError(f"No genes found where var['{mask_var}'] is True.")
+        adata_subset = adata_subset[:, selected].copy()
 
-    # If computing mean expression per cluster, check and compute it.
+    # 3) If mean_cluster=True, aggregate cells by cluster and replace X with the mean 
     if mean_cluster:
         if groupby not in adata_subset.obs.columns:
             raise ValueError(f"Column '{groupby}' not found in adata.obs.")
-        # It is assumed that this function computes and stores the result in adata_subset.uns['mean_expression']
-        
-        # compute_mean_expression_per_cluster(adata_subset, groupby)
         adata_subset = sc.get.aggregate(adata_subset, by=groupby, func='mean')
-        adata_subset.X  = adata_subset.layers['mean']
+        adata_subset.X = adata_subset.layers['mean']
 
-        # Replace the data with the mean expression matrix
-        # if 'mean_expression' not in adata_subset.uns:
-        #    raise ValueError("Mean expression not found in .uns after computing clusters.")
-        # adata_subset = adata_subset.uns['mean_expression'].copy()
-
-    # Transpose so that genes (or clusters) become observations
+    # 4) Transpose so that genes (or cluster‐means) become observations
     adata_transposed = adata_subset.T.copy()
 
-    # Run PCA and determine number of PCs from the elbow method
-    sc.tl.pca(adata_transposed)
-    elbow = find_elbow(adata_transposed)
-    n_pcs = elbow + npcs_adjust
+    # 5) If the metric is 'correlation' and X is sparse, convert to dense
+    if metric == 'correlation' and sparse.issparse(adata_transposed.X):
+        adata_transposed.X = adata_transposed.X.toarray()
 
-    # Compute the kNN graph using correlation as the metric
-    # sc.pp.neighbors(adata_transposed, n_neighbors=knn, n_pcs=n_pcs, metric='correlation')
-    sc.pp.neighbors(adata_transposed, n_neighbors=knn, n_pcs=n_pcs, metric='euclidean')
-    
-    # Perform Leiden clustering with an explicit resolution keyword
+    # 6) Build the kNN graph directly on .X (no PCA)
+    sc.pp.neighbors(adata_transposed, n_neighbors=knn, metric=metric, n_pcs=0)
+
+    # 7) Leiden clustering on that graph
     sc.tl.leiden(adata_transposed, resolution=leiden_resolution)
-    
-    # Group indices by Leiden clusters and add prefix to module names
+
+    # 8) Group by Leiden label to collect modules
     clusters = (
-        adata_transposed.obs.groupby('leiden', observed=True)
-        .apply(lambda df: df.index.tolist())
+        adata_transposed.obs
+        .groupby('leiden', observed=True)['leiden']
+        .apply(lambda ser: ser.index.tolist())
         .to_dict()
     )
-    modules = {f"{prefix}{cluster}": indices for cluster, indices in clusters.items()}
+    modules = {f"{prefix}{cluster_id}": gene_list for cluster_id, gene_list in clusters.items()}
 
-    # Save the modules in the original adata uns field
+    # 9) Write modules back to the original AnnData (in-place)
     adata.uns['knn_modules'] = modules
+
+
 
 
 def what_module_has_gene(
@@ -119,9 +332,6 @@ def what_module_has_gene(
         raise ValueError(mod_slot + " have not been identified.")
     genemodules = adata.uns[mod_slot]
     return [key for key, genes in genemodules.items() if target_gene in genes]
-
-
-
 
 
 
