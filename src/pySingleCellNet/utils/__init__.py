@@ -15,11 +15,11 @@ from .adataTools import (
 )
 
 from .gene import (
-    build_gene_knn_graph,
-    query_gene_neighbors,
-    score_gene_modules,
-    find_knn_modules,
-    what_module_has_gene,
+#    build_gene_knn_graph,
+#    query_gene_neighbors,
+#    score_gene_modules,
+#    find_knn_modules,
+#    what_module_has_gene,
     extract_top_bottom_genes,
     rank_genes_subsets,
     pull_out_genes,
@@ -40,7 +40,6 @@ from .cell import (
     detect_outliers
 )
 
-
 from .annotation import (
     create_gene_structure_dict_by_stage,
     filter_genes_dict,
@@ -53,23 +52,10 @@ from .colors import (
     get_unique_colors
 )
 
-from .spatial import (
-    rotate_spatial_coordinates,
-    flip_spatial_coordinates,
-    annotate_spatially_variable_genes,
-    compute_contour_profiles,
-    annotate_axis_association,
-)
-
 # API
 __all__ = [
-    "build_gene_knn_graph",
-    "query_gene_neighbors",
-    "rotate_spatial_coordinates",
-    "flip_spatial_coordinates",
-    "annotate_spatially_variable_genes",
-    "compute_contour_profiles",
-    "annotate_axis_association",
+#    "build_gene_knn_graph",
+#    "query_gene_neighbors",
     "find_knee_point",
     "mito_rib",
     "mito_rib_heme",
@@ -79,8 +65,8 @@ __all__ = [
     "build_knn_graph",
     "filter_anndata_slots",
     "find_elbow",
-    "score_gene_modules",
-    "find_knn_modules",
+#    "score_gene_modules",
+#    "find_knn_modules",
     "extract_top_bottom_genes",
     "rank_genes_subsets",
     "pull_out_genes",

@@ -1,6 +1,6 @@
 # classifier functions
 
-more details on the clf object
+Functions that create or require the classifier `clf` object.
 
 ::: pySingleCellNet.classify
 

@@ -12,6 +12,8 @@ from .bar import (
 )
 
 from .spatial import (
+    plot_spatial_two_genes_stack,
+    scatter_genes_oneper,
     spatial_contours,
     spatial_two_genes
 )
@@ -38,6 +40,7 @@ from .scatter import (
 
 # API
 __all__ = [
+    "plot_spatial_two_genes_stack",
     "scatter_genes_oneper",
     "spatial_contours",
     "make_bivariate_cmap",

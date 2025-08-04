@@ -1,0 +1,9 @@
+/* hide jupyter notebooks input/output numbers */
+.jp-InputPrompt {
+  display: none !important;
+}
+
+.jp-OutputPrompt {
+  display: none !important;
+}
+

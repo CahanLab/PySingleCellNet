@@ -5,6 +5,22 @@ from scipy.interpolate import griddata
 from scipy.ndimage import gaussian_filter
 from matplotlib.colors import to_hex
 import matplotlib.pyplot as plt
+import contextlib
+
+@contextlib.contextmanager
+def _temp_plt_axes(fig, ax_sc, ax_cb):
+    """Monkey‐patch plt.subplots/plt.show to draw into (ax_sc,ax_cb) only."""
+    orig_subplots, orig_show = plt.subplots, plt.show
+    # fake subplots to return our single row of axes
+    plt.subplots = lambda *args, **kwargs: (fig, (ax_sc, ax_cb))
+    # disable pop‐ups inside spatial_two_genes
+    plt.show = lambda *args, **kwargs: None
+    try:
+        yield
+    finally:
+        # always restore, even on error
+        plt.subplots, plt.show = orig_subplots, orig_show
+
 
 def _smooth_contour(
     x: np.ndarray,

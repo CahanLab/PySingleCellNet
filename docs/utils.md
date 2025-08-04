@@ -1,6 +1,6 @@
-# utility functions
+# Utilities
 
-Add a brief summary here
+Miscellaneous functions
 
 ::: pySingleCellNet.utils
 

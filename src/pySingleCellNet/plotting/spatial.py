@@ -1,12 +1,11 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from anndata import AnnData
-from .helpers import _smooth_contour
+from .helpers import _smooth_contour, _temp_plt_axes
 from matplotlib.colors import to_hex, ListedColormap
 from scipy.interpolate import griddata
 from scipy.ndimage import gaussian_filter
-from typing import Union, Sequence, Callable, Optional, Dict
-
+from typing import Union, Sequence, Callable, Optional, Dict, Tuple
 import math
 
 def scatter_genes_oneper(
@@ -115,6 +114,46 @@ def scatter_genes_oneper(
     plt.show()
 
 
+def plot_spatial_two_genes_stack(
+    adatas, 
+    gene1,
+    gene2,
+    cmap,
+    width_ratios: Tuple[float, float] = (3, 1),
+    **kwargs
+):
+    n = len(adatas)
+    fig, axes = plt.subplots(
+        n, 2,
+        figsize=(8, 4 * n),
+        gridspec_kw={'width_ratios': width_ratios,
+                     'wspace': 0.15, 'hspace': 0.2}
+    )
+    # make sure axes is 2D
+    if n == 1:
+        axes = np.expand_dims(axes, 0)
+
+    for i, ad in enumerate(adatas):
+        ax_sc, ax_cb = axes[i]
+
+        # wrap the call to guarantee cleanup
+        with _temp_plt_axes(fig, ax_sc, ax_cb):
+            try:
+                spatial_two_genes(
+                    ad, gene1, gene2, cmap, width_ratios=width_ratios, **kwargs
+                )
+            except Exception as e:
+                # you can log or print the error and continue
+                print(f"Error plotting {i}-th AnnData: {e}")
+
+        # Optional: add a row title
+        title = ad.uns.get('sample', f'Sample {i+1}')
+        ax_sc.set_title(f"{title}: {gene1} vs {gene2}")
+
+    plt.tight_layout()
+    return fig
+
+
 def spatial_two_genes(
     adata: AnnData,
     gene1: str,
@@ -123,15 +162,16 @@ def spatial_two_genes(
     spot_size: float = 2,
     alpha: float = 0.9,
     spatial_key: str = 'X_spatial',
-    log_transform: bool = True,
+    log_transform: bool = False,
     clip_percentiles: tuple = (0, 99.5),
-    priority_metric: str = 'sum'
+    priority_metric: str = 'sum',
+    show_xcoords: bool = False,
+    show_ycoords: bool = False,
+    show_bbox: bool = False,
+    show_legend: bool = True,
+    width_ratios: Tuple[float, float] = (10, 1)
 ) -> None:
     """Plot two‐gene spatial expression with a bivariate colormap.
-
-    Scales, optionally log‐transforms and percentile‐clips each gene,
-    normalizes them to [0,1], then uses bilinear interpolation onto
-    a bivariate colormap LUT. Cells with high expression are on top (if overlapping).
 
     Args:
         adata: AnnData with spatial coords in `adata.obsm[spatial_key]`.
@@ -147,7 +187,13 @@ def spatial_two_genes(
             - 'sum': u + v (default)
             - 'gene1': u only
             - 'gene2': v only
-
+        show_xcoords: Whether to display x-axis ticks and labels.
+        show_ycoords: Whether to display y-axis ticks and labels.
+        show_bbox: Whether to display the bounding box (spines).
+        show_legend: Whether to display the legend/colorbar.
+        width_ratios: 2‐tuple giving the relative widths of
+                  (scatter_panel, legend_panel). Defaults to (3,1).
+    
     Raises:
         ValueError: If spatial coords are missing/malformed or
                     if `priority_metric` is invalid.
@@ -218,10 +264,11 @@ def spatial_two_genes(
     coords_sorted = coords[order]
     colors_sorted = [hex_colors[i] for i in order]
 
-    # 9) plot scatter + legend grid
+    # 9) plot scatter + optional legend
     fig, (ax_sc, ax_cb) = plt.subplots(
-        1, 2, figsize=(8, 4),
-        gridspec_kw={'width_ratios': [3, 1], 'wspace': 0.3}
+        1, 2,
+        figsize=(8, 4),
+        gridspec_kw={'width_ratios': width_ratios, 'wspace': 0.3}
     )
     ax_sc.scatter(
         coords_sorted[:, 0],
@@ -231,16 +278,193 @@ def spatial_two_genes(
         alpha=alpha
     )
     ax_sc.set_aspect('equal')
-    ax_sc.set_title(f"{gene1} vs {gene2}")
+    ax_sc.set_title(f"{gene1} :: {gene2}")
 
-    lut_img = C  # shape (n,n,3)
-    ax_cb.imshow(lut_img, origin='lower', extent=[0, 1, 0, 1])
-    ax_cb.set_xlabel(f"{gene1}\nlow → high")
-    ax_cb.set_ylabel(f"{gene2}\nlow → high")
-    ax_cb.set_xticks([0, 1]); ax_cb.set_yticks([0, 1])
-    ax_cb.set_aspect('equal')
+    # axis display options
+    if not show_xcoords:
+        ax_sc.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+    if not show_ycoords:
+        ax_sc.tick_params(axis='y', which='both', left=False, right=False, labelleft=False)
+    if not show_bbox:
+        for spine in ax_sc.spines.values():
+            spine.set_visible(False)
+
+    # legend/colorbar
+    if show_legend:
+        lut_img = C  # shape (n,n,3)
+        ax_cb.imshow(lut_img, origin='lower', extent=[0, 1, 0, 1])
+        # ax_cb.set_xlabel(f"{gene1}\nlow → high")
+        # ax_cb.set_ylabel(f"{gene2}\nlow → high")
+        ax_cb.set_xlabel(f"{gene1}")
+        ax_cb.set_ylabel(f"{gene2}")
+        ax_cb.set_xticks([0, 1]); ax_cb.set_yticks([0, 1])
+        ax_cb.set_aspect('equal')
+    else:
+        ax_cb.axis('off')
 
     plt.show()
+
+
+import math
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import to_hex, ListedColormap
+try:
+    from anndata import AnnData
+except ImportError:
+    AnnData = object
+from typing import Sequence, Tuple
+
+def embed_bivariate_multi(
+    adata: AnnData,
+    genes1: Sequence[str],
+    genes2: Sequence[str],
+    cmap: ListedColormap,
+    spot_size: float = 2,
+    alpha: float = 0.9,
+    spatial_key: str = 'X_spatial',
+    log_transform: bool = False,
+    clip_percentiles: Tuple[float, float] = (0, 99.5),
+    priority_metric: str = 'sum',
+    n_rows: int = 1,
+    show_xcoords: bool = False,
+    show_ycoords: bool = False,
+    show_bbox: bool = False,
+    legend: bool = True,
+    width_ratio: Tuple[float, float] = (10, 1),
+    panel_size: float = 4.0
+) -> None:
+    """Display multiple bivariate‐gene spatial maps in a grid with shared legend.
+
+    Args:
+        adata: AnnData with coords in adata.obsm[spatial_key] (n_obs,2).
+        genes1: First genes for each panel.
+        genes2: Second genes, same length as genes1.
+        cmap: Bivariate colormap (ListedColormap).
+        spot_size: Marker size.
+        alpha: Marker transparency.
+        spatial_key: Key in adata.obsm for x,y coords.
+        log_transform: If True, log1p each gene.
+        clip_percentiles: Percentile clip bounds.
+        priority_metric: 'sum', 'gene1', or 'gene2'.
+        n_rows: Number of grid rows.
+        show_xcoords: Show x-axis ticks/labels.
+        show_ycoords: Show y-axis ticks/labels.
+        show_bbox: Show axis spines.
+        legend: If True, draw shared legend.
+        width_ratio: Tuple (scatter_region_ratio, legend_region_ratio),
+            controlling relative widths in the GridSpec.
+        panel_size: Size (inches) of each scatter panel (both width and height).
+
+    Raises:
+        ValueError: If genes1/genes2 lengths differ or coords missing.
+    """
+    # Validate input lengths
+    if len(genes1) != len(genes2):
+        raise ValueError("genes1 and genes2 must be the same length.")
+    n_plots = len(genes1)
+    if n_plots == 0:
+        raise ValueError("Must provide at least one gene pair.")
+
+    # Get coordinates
+    coords = adata.obsm.get(spatial_key)
+    if coords is None or coords.ndim != 2 or coords.shape[1] < 2:
+        raise ValueError(f"adata.obsm['{spatial_key}'] must be shape (n_obs,2).")
+    xs, ys = coords[:, 0], coords[:, 1]
+
+    # Prepare colormap LUT
+    m = len(cmap.colors)
+    n = int(math.sqrt(m))
+    C = np.array(cmap.colors).reshape(n, n, 3)
+
+    # Layout geometry
+    n_cols = math.ceil(n_plots / n_rows)
+    w_sc, w_leg = width_ratio
+    fig_width = panel_size * (n_cols * w_sc + (w_leg if legend else 0)) / w_sc
+    fig_height = panel_size * n_rows
+
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    # GridSpec: n_rows x (n_cols + 1 for legend if needed)
+    total_cols = n_cols + (1 if legend else 0)
+    col_ratios = [w_sc] * n_cols + ([w_leg] if legend else [])
+    gs = fig.add_gridspec(n_rows, total_cols, width_ratios=col_ratios, wspace=0.1, hspace=0.1)
+
+    def _get_array(x):
+        return x.toarray().flatten() if hasattr(x, 'toarray') else x.flatten()
+
+    # Plot panels
+    for idx, (g1, g2) in enumerate(zip(genes1, genes2)):
+        row = idx // n_cols
+        col = idx % n_cols
+        ax = fig.add_subplot(gs[row, col])
+
+        # extract & preprocess
+        X1 = _get_array(adata[:, g1].X)
+        X2 = _get_array(adata[:, g2].X)
+        if log_transform:
+            X1 = np.log1p(X1); X2 = np.log1p(X2)
+        lo1, hi1 = np.percentile(X1, clip_percentiles)
+        lo2, hi2 = np.percentile(X2, clip_percentiles)
+        X1 = np.clip(X1, lo1, hi1); X2 = np.clip(X2, lo2, hi2)
+        u = (X1 - lo1)/(hi1 - lo1) if hi1>lo1 else np.zeros_like(X1)
+        v = (X2 - lo2)/(hi2 - lo2) if hi2>lo2 else np.zeros_like(X2)
+
+        # bilinear LUT mapping
+        gu, gv = u*(n-1), v*(n-1)
+        i0, j0 = np.floor(gu).astype(int), np.floor(gv).astype(int)
+        i1, j1 = np.minimum(i0+1, n-1), np.minimum(j0+1, n-1)
+        du, dv = gu-i0, gv-j0
+        wa, wb = (1-du)*(1-dv), du*(1-dv)
+        wc, wd = (1-du)*dv, du*dv
+        c00, c10 = C[j0, i0], C[j0, i1]
+        c01, c11 = C[j1, i0], C[j1, i1]
+        cols = c00*wa[:,None] + c10*wb[:,None] + c01*wc[:,None] + c11*wd[:,None]
+        hexcols = [to_hex(c) for c in cols]
+
+        # draw order
+        if priority_metric == 'sum':
+            pr = u + v
+        elif priority_metric == 'gene1':
+            pr = u
+        elif priority_metric == 'gene2':
+            pr = v
+        else:
+            raise ValueError("priority_metric must be 'sum', 'gene1', or 'gene2'")
+        order = np.argsort(pr)
+
+        ax.scatter(xs[order], ys[order],
+                   c=[hexcols[i] for i in order],
+                   s=spot_size, alpha=alpha)
+        ax.set_aspect('equal')
+        ax.set_title(f"{g1} :: {g2}", pad=4)
+
+        if not show_xcoords:
+            ax.set_xticks([]); ax.set_xticklabels([])
+        if not show_ycoords:
+            ax.set_yticks([]); ax.set_yticklabels([])
+        if not show_bbox:
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+    # Turn off unused panels
+    for idx in range(n_plots, n_rows * n_cols):
+        row = idx // n_cols
+        col = idx % n_cols
+        fig.add_subplot(gs[row, col]).axis('off')
+
+    # Shared legend
+    if legend:
+        lg_ax = fig.add_subplot(gs[:, -1])
+        lg_ax.imshow(C, origin='lower', extent=[0, 1, 0, 1])
+        lg_ax.set_xticks([0, 1]); lg_ax.set_yticks([0, 1])
+        lg_ax.set_xlabel("gene1 ↑"); lg_ax.set_ylabel("gene2 ↑")
+        if not show_bbox:
+            for spine in lg_ax.spines.values():
+                spine.set_visible(True)
+
+    plt.tight_layout()
+    plt.show()
+
 
 
 def spatial_contours(
