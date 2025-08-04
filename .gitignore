@@ -4,3 +4,4 @@ build/
 dist/
 pySingleCellNet.egg-info/
 __pycache__/
+site/
