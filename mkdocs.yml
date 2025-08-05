@@ -71,8 +71,9 @@ nav:
   - Training data: training_data.md
   - References: refs.md
   - API:
-    - 'Utility functions': 'utils.md'
-    - 'Classifier functions': 'classifier.md'
-    - 'Plotting functions': 'plotting.md'
+    - 'Utilities': 'utils.md'
+    - 'Classifier': 'classifier.md'
+    - 'Plotting': 'plotting.md'
+  - Release Notes: CHANGELOG.md
 
 

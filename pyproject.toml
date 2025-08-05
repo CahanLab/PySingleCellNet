@@ -1,8 +1,8 @@
 # ────────────── build backend ──────────────
 [build-system]
 requires = [
-  "setuptools>=68",      # modern PEP 621 support
-  "wheel",
+  "setuptools>=80",      # modern PEP 621 support
+#  "wheel",
   "setuptools-scm>=8"    # derive version from Git tags
 ]
 build-backend = "setuptools.build_meta"
@@ -10,22 +10,22 @@ build-backend = "setuptools.build_meta"
 # ────────────── project metadata (PEP 621) ──────────────
 [project]
 name = "pySingleCellNet"
-dynamic = ["version"]          # setuptools-scm will fill this in
+dynamic = ["version"]          
 description = "Single-cell classification and analysis, optimized for embryonic and fetal development"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
-
+license = "MIT"
+keywords = ["single cell", "cell typing", "classification", "embryo", "embryoid", "gastruloid"]
 authors = [
   {name = "Patrick Cahan", email = "patrick.cahan@gmail.com"},
   {name = "Yuqi Tan",       email = "ytan19@jhmi.edu"}
 ]
 
-# Runtime dependencies (same list you had in setup.py; keep them lowercase & PEP 440 compliant)
 dependencies = [
   "pandas",
   "numpy",
   "scikit-learn",
+  "scikit-misc",
   "scanpy",
   "statsmodels",
   "scipy",
@@ -41,22 +41,25 @@ dependencies = [
 ]
 
 [project.urls]
-Documentation = "https://pysinglecellnet.readthedocs.io/en/latest/"
+Documentation = "https://cahanlab-pysinglecellnet.readthedocs-hosted.com/"
 Source        = "https://github.com/CahanLab/PySingleCellNet"
+Repository    = "https://github.com/CahanLab/PySingleCellNet.git"
 Issues        = "https://github.com/CahanLab/PySingleCellNet/issues"
+Changelog     = "https://github.com/CahanLab/PySingleCellNet/tree/master/docs/CHANGELOG.md"
+
 
 # ────────────── setuptools-specific settings ──────────────
-[tool.setuptools]
-package-dir = {"" = "src"}              # tells setuptools to look in src/
-# auto-discover everything under src/  (same behaviour as find_packages())
-packages = ["pySingleCellNet"]
+#[tool.setuptools]
+#package-dir = {"" = "src"}              
+#packages = ["pySingleCellNet"]
 
 # Alternative: use the finder (uncomment if you prefer)
-# [tool.setuptools.packages.find]
-# where = ["src"]
-# exclude = ["tests*"]
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["docs"]
 
 # ────────────── setuptools-scm tweaks (optional) ──────────────
 [tool.setuptools_scm]
-version_scheme = "post-release"         # 0.3.0 → 0.3.1.devN after the tag
-local_scheme   = "no-local"             # omit +g<hash> in wheels uploaded to PyPI
+version_scheme = "only-version"
+local_scheme   = "no-local-version"
+write_to       = "src/pySingleCellNet/_version.py" 

@@ -5,3 +5,4 @@ dist/
 pySingleCellNet.egg-info/
 __pycache__/
 site/
+_version.py
