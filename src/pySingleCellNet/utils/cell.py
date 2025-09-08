@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 # from anndata import AnnData
@@ -6,15 +8,176 @@ import scanpy as sc
 import anndata as ad
 # from scipy.sparse import issparse
 # from alive_progress import alive_bar
-from scipy.stats import median_abs_deviation
+from scipy.stats import median_abs_deviation, ttest_ind
 # import string
 import igraph as ig
+from scipy import sparse
+from sklearn.decomposition import PCA
+
+def clustering_quality_vs_nn(
+    adata,
+    label_col: str,
+    n_genes: int = 5,
+    naive: dict = {"p_val": 1e-2, "fold_change": 0.25},
+    strict: dict = {"minpercentin": 0.20, "maxpercentout": 0.10},
+    n_pcs_for_nn: int = 40,
+):
+    """
+    For each cluster, find its nearest neighbor cluster and count genes that meet
+    (1) naive DE criteria: p-value <= naive['p_val'] AND log2FC >= naive['fold_change']
+    (2) strict DE criteria: pct_in >= strict['minpercentin'] AND pct_out <= strict['maxpercentout'].
+    
+    Parameters
+    ----------
+    adata : AnnData
+        Single-cell object. Uses adata.X for expression (dense or sparse).
+    label_col : str
+        .obs column with cluster labels.
+    n_genes : int, default 5
+        For reporting convenience: include top n gene names (by effect size) for each rule.
+        Does not affect the counts.
+    naive : dict
+        {'p_val': float, 'fold_change': float} ; fold_change is on log2 scale.
+    strict : dict
+        {'minpercentin': float, 'maxpercentout': float}
+    n_pcs_for_nn : int, default 30
+        Number of PCs (if available or computed) for nearest-neighbor cluster search.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns: ['cluster', 'nn_cluster', 'n_genes_naive', 'n_genes_strict',
+                  'top_naive_genes', 'top_strict_genes']
+    """
+    # ----- helpers -----
+    def _to_dense(X):
+        return X.A if sparse.issparse(X) else np.asarray(X)
+
+    def _get_representation(adata, n_pcs_for_nn):
+        # Prefer existing PCA; otherwise compute a compact representation
+        if "X_pca" in adata.obsm and adata.obsm["X_pca"].shape[1] >= min(2, n_pcs_for_nn):
+            rep = adata.obsm["X_pca"][:, :n_pcs_for_nn]
+            return np.asarray(rep)
+        # else: compute PCA on log1p(counts), on a subset of genes to keep things light
+        X = _to_dense(adata.X)
+        # choose up to 2000 HVGs if available; else top-1000 variable genes
+        if "highly_variable" in adata.var.columns and adata.var["highly_variable"].any():
+            genes_mask = adata.var["highly_variable"].values
+        else:
+            # compute variance per gene quickly
+            var = X.var(axis=0)
+            topk = min(1000, X.shape[1])
+            genes_mask = np.zeros(X.shape[1], dtype=bool)
+            genes_mask[np.argsort(var)[-topk:]] = True
+        Xg = np.log1p(X[:, genes_mask])
+        # center per gene
+        Xg = Xg - Xg.mean(axis=0, keepdims=True)
+        pca = PCA(n_components=min(n_pcs_for_nn, Xg.shape[1], Xg.shape[0]-1))
+        return pca.fit_transform(Xg)
+
+    def _cluster_centroids(rep, labels):
+        centroids = {}
+        for c in labels.unique():
+            idx = (labels == c).values
+            if idx.sum() == 0:
+                continue
+            centroids[c] = rep[idx].mean(axis=0)
+        return centroids
+
+    def _nearest_neighbors(centroids):
+        # For each cluster, find the nearest other cluster (Euclidean)
+        keys = list(centroids.keys())
+        arr = np.stack([centroids[k] for k in keys], axis=0)
+        # pairwise distances
+        d2 = np.sum((arr[:, None, :] - arr[None, :, :])**2, axis=2)
+        np.fill_diagonal(d2, np.inf)
+        nn_idx = np.argmin(d2, axis=1)
+        return {keys[i]: keys[j] for i, j in enumerate(nn_idx)}
+
+    # ----- main -----
+    if label_col not in adata.obs.columns:
+        raise ValueError(f"'{label_col}' not found in adata.obs")
+
+    labels = adata.obs[label_col].astype("category")
+    clusters = pd.Index(labels.cat.categories)
+
+    rep = _get_representation(adata, n_pcs_for_nn)
+    centroids = _cluster_centroids(rep, labels)
+    if len(centroids) < 2:
+        raise ValueError("Need at least two clusters to compute nearest neighbors.")
+    nn_map = _nearest_neighbors(centroids)
+
+    # Expression matrix (cells x genes), dense for vectorized ops
+    X = _to_dense(adata.X)
+    genes = adata.var_names.to_numpy()
+
+    rows = []
+    for c in clusters:
+        if c not in nn_map:
+            continue
+        nnc = nn_map[c]
+        in_mask = (labels == c).to_numpy()
+        out_mask = (labels == nnc).to_numpy()
+
+        Xin = X[in_mask, :]
+        Xout = X[out_mask, :]
+
+        # log1p for t-test stability; raw means for FC with small epsilon
+        logXin = np.log1p(Xin)
+        logXout = np.log1p(Xout)
+
+        # Welch t-test per gene
+        # (scipy vectorizes if axis=0; handle potential NaNs for constant columns)
+        t_stat, p_vals = ttest_ind(logXin, logXout, equal_var=False, axis=0, nan_policy="omit")
+        p_vals = np.nan_to_num(p_vals, nan=1.0)
+
+        # log2 fold-change on raw means with small epsilon
+        eps = 1e-9
+        mu_in = Xin.mean(axis=0) + eps
+        mu_out = Xout.mean(axis=0) + eps
+        log2fc = np.log2(mu_in / mu_out)
+
+        # pct expressed
+        pct_in = (Xin > 0).mean(axis=0)
+        pct_out = (Xout > 0).mean(axis=0)
+
+        # criteria
+        naive_mask = (p_vals <= float(naive["p_val"])) & (log2fc >= float(naive["fold_change"]))
+        strict_mask = (pct_in >= float(strict["minpercentin"])) & (pct_out <= float(strict["maxpercentout"]))
+
+        n_naive = int(naive_mask.sum())
+        n_strict = int(strict_mask.sum())
+
+        # top-gene reporting (up to n_genes), sorted by effect size
+        top_naive = genes[naive_mask]
+        if top_naive.size:
+            ord_ix = np.argsort(-log2fc[naive_mask])
+            top_naive = top_naive[ord_ix][:n_genes]
+        top_strict = genes[strict_mask]
+        if top_strict.size:
+            ord_ix = np.argsort(-log2fc[strict_mask])
+            top_strict = top_strict[ord_ix][:n_genes]
+
+        rows.append({
+            "cluster": c,
+            "nn_cluster": nnc,
+            "n_genes_naive": n_naive,
+            "n_genes_strict": n_strict,
+            "top_naive_genes": ";".join(map(str, top_naive)) if top_naive.size else "",
+            "top_strict_genes": ";".join(map(str, top_strict)) if top_strict.size else "",
+        })
+
+    out = pd.DataFrame(rows).sort_values(["cluster"]).reset_index(drop=True)
+    return out
+
+
+
 
 
 def cluster_subclusters(
     adata: ad.AnnData,
     cluster_column: str = 'leiden',
-    cluster_name: str = None,
+    to_subcluster: list[str] = None,
     layer: str = 'counts',
     n_hvg: int = 2000,
     n_pcs: int = 40,
@@ -23,17 +186,19 @@ def cluster_subclusters(
     subcluster_col_name: str = 'subcluster'
 ) -> None:
     """
-    Subcluster a specified cluster (or all clusters) within an AnnData object by recomputing HVGs, PCA,
+    Subcluster selected clusters (or all clusters) within an AnnData object by recomputing HVGs, PCA,
     kNN graph, and Leiden clustering. Updates the AnnData object in-place, adding or updating
     the `subcluster_col_name` column in `.obs` with new labels prefixed by the original cluster.
-    
+
+    Cells in clusters not listed in `to_subcluster` retain their original cluster label as their "subcluster".
+
     Args:
         adata: AnnData
             The AnnData object containing precomputed clusters in `.obs[cluster_column]`.
         cluster_column: str, optional
             Name of the `.obs` column holding the original cluster assignments. Default is 'leiden'.
-        cluster_name: str or None, optional
-            Specific cluster label to subcluster. If `None`, applies to all clusters. Default is None.
+        to_subcluster: list of str, optional
+            List of cluster labels (as strings) to subcluster. If `None`, subclusters *all* clusters.
         layer: str, optional
             Layer name in `adata.layers` to use for HVG detection. Default is 'counts'.
         n_hvg: int, optional
@@ -46,40 +211,39 @@ def cluster_subclusters(
             Resolution parameter for Leiden clustering. Default is 0.25.
         subcluster_col_name: str, optional
             Name of the `.obs` column to store subcluster labels. Default is 'subcluster'.
-    
+
     Raises:
         ValueError: If `cluster_column` not in `adata.obs`.
         ValueError: If `layer` not in `adata.layers`.
-        ValueError: If `cluster_name` is specified but not found in `adata.obs[cluster_column]`.
+        ValueError: If any entry in `to_subcluster` is not found in `adata.obs[cluster_column]`.
     """
     # Error checking
     if cluster_column not in adata.obs:
         raise ValueError(f"Cluster column '{cluster_column}' not found in adata.obs")
     if layer not in adata.layers:
         raise ValueError(f"Layer '{layer}' not found in adata.layers")
-    
-    # Convert original clusters to string
+
+    # Cast original clusters to string
     adata.obs['original_cluster'] = adata.obs[cluster_column].astype(str)
-    
-    # Ensure subcluster column exists
-    adata.obs[subcluster_col_name] = ""
-    
-    # Validate cluster_name
-    unique_clusters = adata.obs['original_cluster'].unique()
-    if cluster_name is not None:
-        if str(cluster_name) not in unique_clusters:
-            raise ValueError(
-                f"Cluster '{cluster_name}' not found in adata.obs['{cluster_column}']"
-            )
-        clusters_to_process = [str(cluster_name)]
+    adata.obs[subcluster_col_name] = adata.obs['original_cluster']
+
+    # Determine clusters to process
+    unique_clusters = set(adata.obs['original_cluster'])
+    if to_subcluster is None:
+        clusters_to_process = sorted(unique_clusters)
     else:
-        clusters_to_process = unique_clusters
-    
-    # Iterate and subcluster
+        # ensure strings
+        requested = {str(c) for c in to_subcluster}
+        missing = requested - unique_clusters
+        if missing:
+            raise ValueError(f"Clusters not found: {missing}")
+        clusters_to_process = sorted(requested)
+
+    # Iterate and subcluster each requested cluster
     for orig in clusters_to_process:
         mask = adata.obs['original_cluster'] == orig
         sub = adata[mask].copy()
-        
+
         # 1) Compute HVGs
         sc.pp.highly_variable_genes(
             sub,
@@ -87,13 +251,13 @@ def cluster_subclusters(
             n_top_genes=n_hvg,
             layer=layer
         )
-        
+
         # 2) PCA
         sc.pp.pca(sub, n_comps=n_pcs, use_highly_variable=True)
-        
+
         # 3) kNN
         sc.pp.neighbors(sub, n_neighbors=n_neighbors, use_rep='X_pca')
-        
+
         # 4) Leiden
         sc.tl.leiden(
             sub,
@@ -102,10 +266,10 @@ def cluster_subclusters(
             n_iterations=2,
             key_added='leiden_sub'
         )
-        
-        # Prefix and assign back
-        labels = (orig + "_" + sub.obs['leiden_sub'].astype(str)).values
-        adata.obs.loc[mask, subcluster_col_name] = labels
+
+        # Prefix subcluster labels and write back
+        new_labels = orig + "_" + sub.obs['leiden_sub'].astype(str)
+        adata.obs.loc[mask, subcluster_col_name] = new_labels.values
 
 
 

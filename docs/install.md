@@ -1,15 +1,11 @@
-PySingleCellnet depends on several packages, most of which can be installed with pip, and some are available in conda channels.
+The easiest way to install PySingleCellNet is available on PyPI. Install it from there with:
 
-I recommend pre-installing the following:
-
-```shell
-pip install scanpy python-igraph leidenalg
+```
+pip install pySingleCellNet
 ```
 
-Then, you should be able to install pySingleCellNet with PIP as follows:
+Alternatively, you can install directly from GitHub with: 
 
 ```shell
 pip install git+https://github.com/CahanLab/pySingleCellNet.git
 ```
-
-This will install any remaining required packages, too
