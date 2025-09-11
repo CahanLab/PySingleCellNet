@@ -1,98 +1,122 @@
+from __future__ import annotations
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import anndata as ad
-from typing import Dict, List, Optional
-from scipy.sparse import issparse
+from typing import Dict, List, Optional, Set, Tuple, Union
+import re
+from scipy.sparse import issparse, coo_matrix, csr_matrix, hstack
 import igraph as ig
 import scipy.sparse as sp
+from scipy.stats import median_abs_deviation, ttest_ind
+from scipy import sparse
+from sklearn.decomposition import PCA
+import math
+from scipy.sparse.csgraph import connected_components
 
-import scipy.sparse as sp
 
-def impute_knn_dropout(
-    adata,
-    knn_key: str = "neighbors",
-    layer_name: str = None
-):
+def split_adata_indices(
+    adata: ad.AnnData,
+    n_cells: int = 100,
+    groupby: str = "cell_ontology_class",
+    cellid: str = None,
+    strata_col: str  = None
+) -> tuple:
     """
-    Impute zero‐expression values in `adata.X` (or `adata.raw.X`) by replacing each
-    zero with the weighted mean of that gene over its kNN, where weights come from
-    `adata.obsp[f"{knn_key}_connectivities"]`.
-
-    Parameters
-    ----------
-    adata
-        Annotated data matrix. We will read from `adata.raw.X` if it exists;
-        otherwise from `adata.X`.
-    knn_key
-        Prefix for the two sparse matrices in `adata.obsp`:
-          - `adata.obsp[f"{knn_key}_connectivities"]`
-          - `adata.obsp[f"{knn_key}_distances"]`
-        In Scanpy’s `pp.neighbors(..., key_added=knn_key)`, you get exactly those two names.
-    layer_name
-        Name for the new layer to which the imputed expression matrix will be saved.
-        If None, defaults to `f"{knn_key}_imputed"`.
-
-    Returns
-    -------
-    adata
-        The same AnnData, with an extra entry:
-        `adata.layers[layer_name]` = the imputed expression matrix (sparse if original was sparse).
+    Splits an AnnData object into training and validation indices based on stratification by cell type
+    and optionally by another categorical variable.
+    
+    Args:
+        adata (AnnData): The annotated data matrix to split.
+        n_cells (int): The number of cells to sample per cell type.
+        groupby (str, optional): The column name in adata.obs that specifies the cell type.
+                                 Defaults to "cell_ontology_class".
+        cellid (str, optional): The column in adata.obs to use as a unique identifier for cells.
+                                If None, it defaults to using the index.
+        strata_col (str, optional): The column name in adata.obs used for secondary stratification,
+                                    such as developmental stage, gender, or disease status.
+    
+    Returns:
+        tuple: A tuple containing two lists:
+            - training_indices (list): List of indices for the training set.
+            - validation_indices (list): List of indices for the validation set.
+    
+    Raises:
+        ValueError: If any specified column names do not exist in the DataFrame.
     """
-
-    # 1) Extract the “raw” or primary X matrix
-    if hasattr(adata, "raw") and adata.raw is not None and adata.raw.X is not None:
-        Xorig = adata.raw.X
-    else:
-        Xorig = adata.X
-
-    # Convert to dense numpy for easy indexing/arithmetic
-    was_sparse = sp.issparse(Xorig)
-    X = Xorig.toarray() if was_sparse else Xorig.copy()
-
-    # 2) Grab the connectivities matrix from adata.obsp
-    conn_key = f"{knn_key}_connectivities"
-    if conn_key not in adata.obsp:
-        raise KeyError(
-            f"No key '{conn_key}' found in adata.obsp. "
-            f"Did you run `sc.pp.neighbors(adata, key_added='{knn_key}')`?"
-        )
-
-    C = adata.obsp[conn_key].tocsr()  # shape = (n_cells, n_cells), sparse
-
-    # 3) Row‐normalize C so that each row sums to 1 (for weighted averaging)
-    #    If a row already sums to zero (no neighbors—rare after pp.neighbors), we leave it zero.
-    row_sums = np.array(C.sum(axis=1)).flatten()  # length = n_cells
-    # Avoid division‐by‐zero:
-    inv_row = np.zeros_like(row_sums)
-    nonzero_mask = row_sums > 0
-    inv_row[nonzero_mask] = 1.0 / row_sums[nonzero_mask]
-    D_inv = sp.diags(inv_row)          # diagonal matrix of 1/(row_sums)
-
-    W = D_inv.dot(C)  # now each row of W sums to 1 (except rows that were originally all zero)
-
-    # 4) Compute the kNN‐weighted mean for every cell+gene:
-    #    X_knn[i, g] = sum_j W[i, j] * X[j, g]
-    X_knn = W.dot(X)  # shape = (n_cells, n_genes)
-
-    # 5) Replace zeros in X with weighted neighbor means
-    mask_zero = (X == 0)
-    X_imputed = X.copy()
-    X_imputed[mask_zero] = X_knn[mask_zero]
-
-    # 6) Write the result into a new layer
-    if layer_name is None:
-        layer_name = f"{knn_key}_imputed"
-
-    if was_sparse:
-        adata.layers[layer_name] = sp.csr_matrix(X_imputed)
-    else:
-        adata.layers[layer_name] = X_imputed
-
-    return adata
-
-
-
+    if cellid is None:
+        adata.obs["cellid"] = adata.obs.index
+        cellid = "cellid"
+    if groupby not in adata.obs.columns or (strata_col and strata_col not in adata.obs.columns):
+        raise ValueError("Specified column names do not exist in the DataFrame.")
+    
+    cts = set(adata.obs[groupby])
+    trainingids = []
+    
+    for ct in cts:
+        subset = adata[adata.obs[groupby] == ct]
+        
+        if strata_col:
+            stratified_ids = []
+            strata_groups = subset.obs[strata_col].unique()
+            n_strata = len(strata_groups)
+            
+            # Initialize desired count and structure to store samples per strata
+            desired_per_group = n_cells // n_strata
+            samples_per_group = {}
+            remaining = 0
+            
+            # First pass: allocate base quota or maximum available if less than base
+            for group in strata_groups:
+                group_subset = subset[subset.obs[strata_col] == group]
+                available = group_subset.n_obs
+                if available < desired_per_group:
+                    samples_per_group[group] = available
+                    remaining += desired_per_group - available
+                else:
+                    samples_per_group[group] = desired_per_group
+                
+            # Second pass: redistribute remaining quota among groups that can supply more
+            # Continue redistributing until either there's no remaining quota or no group can supply more.
+            groups_can_supply = True
+            while remaining > 0 and groups_can_supply:
+                groups_can_supply = False
+                for group in strata_groups:
+                    group_subset = subset[subset.obs[strata_col] == group]
+                    available = group_subset.n_obs
+                    # Check if this group can supply an extra cell beyond what we've allocated so far
+                    if samples_per_group[group] < available:
+                        samples_per_group[group] += 1
+                        remaining -= 1
+                        groups_can_supply = True
+                        if remaining == 0:
+                            break
+                        
+            # Sample cells for each strata group based on the determined counts
+            for group in strata_groups:
+                group_subset = subset[subset.obs[strata_col] == group]
+                count_to_sample = samples_per_group.get(group, 0)
+                if count_to_sample > 0:
+                    sampled_ids = np.random.choice(
+                        group_subset.obs[cellid].values, 
+                        count_to_sample, 
+                        replace=False
+                    )
+                    stratified_ids.extend(sampled_ids)
+                
+            trainingids.extend(stratified_ids)
+        else:
+            ccount = min(subset.n_obs, n_cells)
+            sampled_ids = np.random.choice(subset.obs[cellid].values, ccount, replace=False)
+            trainingids.extend(sampled_ids)
+        
+    # Get all unique IDs
+    all_ids = adata.obs[cellid].values
+    # Determine validation IDs
+    assume_unique = adata.obs_names.is_unique
+    val_ids = np.setdiff1d(all_ids, trainingids, assume_unique=assume_unique)
+    
+    return trainingids, val_ids
 
 
 
@@ -156,332 +180,217 @@ def rename_cluster_labels(
     adata.obs[new_col] = adata.obs[old_col].map(label_map)
     adata.obs[new_col] = adata.obs[new_col].astype("category")
 
-
-def generate_joint_graph(adata, connectivity_keys, weights, output_key='jointNeighbors'):
-    """Create a joint graph by combining multiple connectivity graphs with specified weights.
+def limit_anndata_to_common_genes(anndata_list):
+    # Find the set of common genes across all anndata objects
+    common_genes = set(anndata_list[0].var_names)
+    for adata in anndata_list[1:]:
+        common_genes.intersection_update(set(adata.var_names))
     
-    This function computes the weighted sum of selected connectivity and distance matrices 
-    in an AnnData object and stores the result in `.obsp`.
-    
-    Args:
-        adata (AnnData): 
-            The AnnData object containing connectivity matrices in `.obsp`.
-        connectivity_keys (list of str): 
-            A list of keys in `adata.obsp` corresponding to connectivity matrices to combine.
-        weights (list of float): 
-            A list of weights for each connectivity matrix. Must match the length of `connectivity_keys`.
-        output_key (str, optional): 
-            The base key under which to store the combined graph in `.obsp`. 
-            The default is `'jointNeighbors'`.
-    
-    Raises:
-        ValueError: If the number of `connectivity_keys` does not match the number of `weights`.
-        KeyError: If any key in `connectivity_keys` or its corresponding distances key is not found in `adata.obsp`.
-    
-    Returns:
-        None: 
-            Updates the AnnData object in place by adding the combined connectivity and distance matrices
-            to `.obsp` and metadata to `.uns`.
-    
-    Example:
-        >>> generate_joint_graph(adata, ['neighbors_connectivities', 'umap_connectivities'], [0.7, 0.3])
-        >>> adata.obsp['jointNeighbors_connectivities']
-        >>> adata.uns['jointNeighbors']
-    """
+    # Limit the anndata objects to the common genes
+    # latest anndata update broke this:
+    if common_genes:
+         for adata in anndata_list:
+            adata._inplace_subset_var(list(common_genes))
 
-    if len(connectivity_keys) != len(weights):
-        raise ValueError("The number of connectivity keys must match the number of weights.")
-    
-    # Initialize the joint graph and distances matrix with zeros
-    joint_graph = None
-    joint_distances = None
-    # Loop through each connectivity key and weight
-    for key, weight in zip(connectivity_keys, weights):
-        if key not in adata.obsp:
-            raise KeyError(f"'{key}' not found in adata.obsp.")
-        
-        # Retrieve the connectivity matrix
-        connectivity_matrix = adata.obsp[key]
-        # Assume corresponding distances key exists
-        distances_key = key.replace('connectivities', 'distances')
-        if distances_key not in adata.obsp:
-            raise KeyError(f"'{distances_key}' not found in adata.obsp.")
-        distances_matrix = adata.obsp[distances_key]
-        # Initialize or accumulate the weighted connectivity and distances matrices
-        if joint_graph is None:
-            joint_graph = weight * connectivity_matrix
-            joint_distances = weight * distances_matrix
-        else:
-            joint_graph += weight * connectivity_matrix
-            joint_distances += weight * distances_matrix
-        
-    # Save the resulting joint graph and distances matrix in the specified keys of .obsp
-    
-    adata.obsp[output_key + '_connectivities'] = joint_graph
-    adata.obsp[output_key + '_distances'] = joint_distances
-    
-    # Save metadata about the joint graph in .uns
-    adata.uns[output_key] = {
-        'connectivities_key': output_key + '_connectivities',
-        'distances_key': output_key + '_distances',
-        'params': {
-            'connectivity_keys': connectivity_keys,
-            'weights': weights,
-            'method': "umap"
-        }
-    }
+    #return anndata_list
+    #return common_genes
+
+def remove_genes(adata, genes_to_exclude=None):
+    adnew = adata[:,~adata.var_names.isin(genes_to_exclude)].copy()
+    return adnew
 
 
-def combine_pca_scores(adata, n_pcs=50, score_key='SCN_score'):
-    """Combine principal components and gene set scores into a single matrix.
-
-    This function merges the top principal components (PCs) and gene set scores 
-    into a combined matrix stored in `.obsm`.
-
-    Args:
-        adata (AnnData): 
-            AnnData object containing PCA results and gene set scores in `.obsm`.
-        n_pcs (int, optional): 
-            Number of top PCs to include. Default is 50.
-        score_key (str, optional): 
-            Key in `.obsm` where gene set scores are stored. Default is `'SCN_score'`.
-
-    Raises:
-        ValueError: If `'X_pca'` is not found in `.obsm`.  
-        ValueError: If `score_key` is missing in `.obsm`.
-
-    Returns:
-        None: Updates `adata` by adding the combined matrix to `.obsm['X_pca_scores_combined']`.
-
-    Example:
-        >>> combine_pca_scores(adata, n_pcs=30, score_key='GeneSet_Score')
-    """
-
-    # Ensure that the required data exists in .obsm
-    if 'X_pca' not in adata.obsm:
-        raise ValueError("X_pca not found in .obsm. Perform PCA before combining.")
-    
-    if score_key not in adata.obsm:
-        raise ValueError(f"{score_key} not found in .obsm. Please provide valid gene set scores.")
-    
-    # Extract the top n_pcs from .obsm['X_pca']
-    pca_matrix = adata.obsm['X_pca'][:, :n_pcs]
-    
-    # Extract the gene set scores from .obsm
-    score_matrix = adata.obsm[score_key]
-    
-    # Combine PCA matrix and score matrix horizontally (along columns)
-    combined_matrix = np.hstack([pca_matrix, score_matrix])
-    
-    # Add the combined matrix back into .obsm with a new key
-    adata.obsm['X_pca_scores_combined'] = combined_matrix
-
-    print(f"Combined matrix with {n_pcs} PCs and {score_matrix.shape[1]} gene set scores added to .obsm['X_pca_scores_combined'].")
-
-
-
-def build_knn_graph(correlation_matrix, labels, k=5):
-    """
-    Build a k-nearest neighbors (kNN) graph from a correlation matrix.
-    
-    Parameters:
-        correlation_matrix (ndarray): Square correlation matrix.
-        labels (list): Node labels corresponding to the rows/columns of the correlation matrix.
-        k (int): Number of nearest neighbors to connect each node to.
-    
-    Returns:
-        igraph.Graph: kNN graph.
-    """
-
-    # import igraph as ig
-
-    # Ensure the correlation matrix is square
-    assert correlation_matrix.shape[0] == correlation_matrix.shape[1], "Matrix must be square."
-    
-    # Initialize the graph
-    n = len(labels)
-    g = ig.Graph()
-    g.add_vertices(n)
-    g.vs["name"] = labels  # Add node labels
-    
-    # Build kNN edges
-    for i in range(n):
-        # Get k largest correlations (excluding self-correlation)
-        neighbors = np.argsort(correlation_matrix[i, :])[-(k + 1):-1]  # Exclude the node itself
-        for j in neighbors:
-            g.add_edge(i, j, weight=correlation_matrix[i, j])
-    
-    return g
-
-
-def filter_anndata_slots(adata, slots_to_keep):
-    """
-    Creates a copy of an AnnData object and filters it to retain only the specified 
-    slots and elements within those slots. Unspecified slots or elements are removed from the copy.
-    
-    The function operates on a copy of the provided AnnData object, ensuring that the original
-    data remains unchanged. This approach allows users to maintain data integrity while
-    exploring different subsets or representations of their dataset.
-    
-    Args:
-        adata (AnnData): The AnnData object to be copied and filtered. This object
-            represents a single-cell dataset with various annotations and embeddings.
-        slots_to_keep (dict): A dictionary specifying which slots and elements within 
-            those slots to keep. The keys should be the slot names ('obs', 'var', 'obsm',
-            'obsp', 'varm', 'varp'), and the values should be lists of the names within 
-            those slots to preserve. If a slot is not mentioned or its value is None, 
-            all its contents are removed in the copy. Example format:
-            {'obs': ['cluster'], 'var': ['gene_id'], 'obsm': ['X_pca']}
-            
-    Returns:
-        AnnData: A copy of the original AnnData object filtered according to the specified
-        slots to keep. This copy contains only the data and annotations specified by the
-        `slots_to_keep` dictionary, with all other data and annotations removed.
-
-    Example:
-        adata = sc.datasets.pbmc68k_reduced()
-        slots_to_keep = {
-            'obs': ['n_genes', 'percent_mito'],
-            'var': ['n_cells'],
-            # Assuming we want to clear these unless specified to keep
-            'obsm': None,
-            'obsp': None,
-            'varm': None,
-            'varp': None,
-        }
-        filtered_adata = filter_anndata_slots(adata, slots_to_keep)
-        # `filtered_adata` is the modified copy, `adata` remains unchanged.
-    """
-    
-    # Create a copy of the AnnData object to work on
-    adata_copy = adata.copy()
-    
-    # Define all possible slots
-    all_slots = ['obs', 'var', 'obsm', 'obsp', 'varm', 'varp']
-    
-    for slot in all_slots:
-        if slot not in slots_to_keep or slots_to_keep[slot] is None:
-            # If slot is not mentioned or is None, remove all its contents
-            if slot in ['obs', 'var']:
-                setattr(adata_copy, slot, pd.DataFrame(index=getattr(adata_copy, slot).index))
-            else:
-                setattr(adata_copy, slot, {})
-        else:
-            # Specific elements within the slot are specified to be kept
-            elements_to_keep = slots_to_keep[slot]
-            
-            if slot in ['obs', 'var']:
-                # Filter columns for 'obs' and 'var'
-                df = getattr(adata_copy, slot)
-                columns_to_drop = [col for col in df.columns if col not in elements_to_keep]
-                df.drop(columns=columns_to_drop, inplace=True)
-                
-            elif slot in ['obsm', 'obsp', 'varm', 'varp']:
-                # Filter keys for 'obsm', 'obsp', 'varm', 'varp'
-                mapping = getattr(adata_copy, slot)
-                keys_to_drop = [key for key in mapping.keys() if key not in elements_to_keep]
-                for key in keys_to_drop:
-                    del mapping[key]
-    
-    return adata_copy
-
-
-def read_broken_geo_mtx(path: str, prefix: str) -> ad.AnnData:
-    # assumes that obs and var in .mtx _could_ be switched
-    # determines which is correct by size of genes.tsv and barcodes.tsv
-
-    adata = sc.read_mtx(path + prefix + "matrix.mtx")
-    cell_anno = pd.read_csv(path + prefix + "barcodes.tsv", delimiter='\t', header=None)
-    n_cells = cell_anno.shape[0]
-    cell_anno.rename(columns={0:'cell_id'},inplace=True)
-
-    gene_anno = pd.read_csv(path + prefix + "genes.tsv", header=None, delimiter='\t')
-    n_genes = gene_anno.shape[0]
-    gene_anno.rename(columns={0:'gene'},inplace=True)
-
-    if adata.shape[0] == n_genes:
-        adata = adata.T
-
-    adata.obs = cell_anno.copy()
-    adata.obs_names = adata.obs['cell_id']
-    adata.var = gene_anno.copy()
-    adata.var_names = adata.var['gene']
-    return adata
-
-
-# outdated
-def compute_mean_expression_per_cluster(
+def filter_anndata_slots(
     adata,
-    cluster_key
+    slots_to_keep: Dict[str, Optional[List[str]]],
+    *,
+    keep_dependencies: bool = True,
 ):
     """
-    Compute mean gene expression for each gene in each cluster, create a new anndata object, and store it in adata.uns.
+    Return a filtered COPY of `adata` that only keeps requested slots/keys.
+    Unspecified slots (or with value None) are cleared.
 
-    Parameters:
-    - adata : anndata.AnnData
-        The input AnnData object with labeled cell clusters.
-    - cluster_key : str
-        The key in adata.obs where the cluster labels are stored.
+    Parameters
+    ----------
+    adata : AnnData
+    slots_to_keep : dict
+        Keys among {'obs','var','obsm','obsp','varm','varp','uns'}.
+        Values are lists of names to keep within that slot; if a slot is not
+        present in the dict or is None, all contents of that slot are removed.
+        Example:
+            {'obs': ['leiden','sample'],
+             'obsm': ['X_pca','X_umap'],
+             'uns':  ['neighbors', 'pca', 'umap']}
+    keep_dependencies : bool, default True
+        If True, automatically keep cross-slot items that are commonly required:
+          - For each neighbors block in `.uns[<key>]` with
+            'connectivities_key' / 'distances_key', also keep those in `.obsp`.
+          - If an `.obsp` key ends with '_connectivities'/'_distances', also keep
+            the matching `.uns[<prefix>]` if present.
+          - If keeping 'X_pca' in `.obsm`, also keep `.uns['pca']` and `.varm['PCs']` if present.
+          - If keeping 'X_umap' in `.obsm`, also keep `.uns['umap']` if present.
 
-    Returns:
-    - anndata.AnnData
-        The modified AnnData object with the mean expression anndata stored in uns['mean_expression'].
+    Returns
+    -------
+    AnnData
+        A copy with filtered slots.
     """
-    if cluster_key not in adata.obs.columns:
-        raise ValueError(f"{cluster_key} not found in adata.obs")
+    ad = adata.copy()
 
-    # Extract unique cluster labels
-    clusters = adata.obs[cluster_key].unique().tolist()
+    # Normalize user intent -> sets (and include absent slots as None)
+    wanted: Dict[str, Optional[Set[str]]] = {}
+    for slot in ['obs','var','obsm','obsp','varm','varp','uns']:
+        v = slots_to_keep.get(slot, None)
+        if v is None:
+            wanted[slot] = None
+        else:
+            wanted[slot] = set(v)
 
-    # Compute mean expression for each cluster
-    mean_expressions = []
-    for cluster in clusters:
-        cluster_cells = adata[adata.obs[cluster_key] == cluster, :]
-        mean_expression = np.mean(cluster_cells.X, axis=0).A1 if issparse(cluster_cells.X) else np.mean(cluster_cells.X, axis=0)
-        mean_expressions.append(mean_expression)
+    if keep_dependencies:
+        # Start with the user's desired keeps; we may add to them
+        for slot in ['obsm','obsp','varm','varp','uns']:
+            if wanted[slot] is None:
+                wanted[slot] = set()
+        # --- neighbors dependencies ---
+        # From kept UNS neighbors -> add OBSP matrices
+        for k in list(wanted['uns']):
+            if k in ad.uns and isinstance(ad.uns[k], dict):
+                ck = ad.uns[k].get('connectivities_key', None)
+                dk = ad.uns[k].get('distances_key', None)
+                if ck is not None:
+                    wanted['obsp'].add(ck)
+                if dk is not None:
+                    wanted['obsp'].add(dk)
+        # From kept OBSP matrices -> add UNS neighbors blocks (by prefix)
+        for m in list(wanted['obsp']):
+            # match "<prefix>_connectivities" or "<prefix>_distances"
+            m_str = str(m)
+            m0 = re.sub(r'_(connectivities|distances)$', '', m_str)
+            if m0 != m_str and (m0 in ad.uns):
+                wanted['uns'].add(m0)
 
-    # Convert to matrix
-    mean_expression_matrix = np.vstack(mean_expressions)
+        # --- PCA/UMAP niceties ---
+        if wanted['obsm'] and 'X_pca' in ad.obsm:
+            if 'X_pca' in wanted['obsm']:
+                if 'pca' in ad.uns:
+                    wanted['uns'].add('pca')
+                if 'PCs' in ad.varm:
+                    wanted['varm'].add('PCs')
+        if wanted['obsm'] and 'X_umap' in ad.obsm and 'X_umap' in wanted['obsm']:
+            if 'umap' in ad.uns:
+                wanted['uns'].add('umap')
+
+        # If the user explicitly set a slot to None, restore None (means "clear all")
+        for slot in ['obsm','obsp','varm','varp','uns']:
+            if slots_to_keep.get(slot, '___SENTINEL___') is None:
+                wanted[slot] = None
+
+    # ---------- Apply filtering ----------
+    # obs / var: keep only requested columns (preserve indices & dtypes)
+    for slot in ['obs','var']:
+        cols_keep = wanted[slot]
+        if cols_keep is None:
+            # drop all columns, preserve index
+            empty = pd.DataFrame(index=getattr(ad, slot).index)
+            setattr(ad, slot, empty)
+        else:
+            df = getattr(ad, slot)
+            cols_exist = [c for c in df.columns if c in cols_keep]
+            setattr(ad, slot, df.loc[:, cols_exist])
+
+    # Mapping-like slots: operate in place to preserve AnnData's aligned mappings
+    def _filter_mapping(mapping, keys_keep: Optional[Set[str]]):
+        if keys_keep is None:
+            mapping.clear()
+            return
+        # Remove any key not in keep set
+        for k in list(mapping.keys()):
+            if k not in keys_keep:
+                del mapping[k]
+
+    _filter_mapping(ad.obsm, wanted['obsm'])
+    _filter_mapping(ad.obsp, wanted['obsp'])
+    _filter_mapping(ad.varm, wanted['varm'])
+    _filter_mapping(ad.varp, wanted['varp'])
+
+    # .uns is a plain dict (but can be nested); keep only top-level keys
+    if wanted['uns'] is None:
+        ad.uns.clear()
+    else:
+        for k in list(ad.uns.keys()):
+            if k not in wanted['uns']:
+                del ad.uns[k]
+
+    return ad
+
+def filter_adata_by_group_size(adata: ad.AnnData, groupby: str, ncells: int = 20) -> ad.AnnData:
+    """
+    Filters an AnnData object to retain only cells from groups with at least 'ncells' cells.
     
-    # Create a new anndata object
-    mean_expression_adata = sc.AnnData(X=mean_expression_matrix, 
-                                       var=pd.DataFrame(index=adata.var_names), 
-                                       obs=pd.DataFrame(index=clusters))
-    
-    # Store this new anndata object in adata.uns
-    adata.uns['mean_expression'] = mean_expression_adata
-    #return adata
-
-
-def find_elbow(
-    adata
-):
-    """
-    Find the "elbow" index in the variance explained by principal components.
-
     Parameters:
-    - variance_explained : list or array
-        Variance explained by each principal component, typically in decreasing order.
-
+    -----------
+    adata : AnnData
+        The input AnnData object containing single-cell data.
+    groupby : str
+        The column name in `adata.obs` used to define groups (e.g., cluster labels).
+    ncells : int, optional (default=20)
+        The minimum number of cells a group must have to be retained.
+    
     Returns:
-    - int
-        The index corresponding to the "elbow" in the variance explained plot.
+    --------
+    filtered_adata : AnnData
+        A new AnnData object containing only cells from groups with at least 'ncells' cells.
+    
+    Raises:
+    -------
+    ValueError:
+        - If `groupby` is not a column in `adata.obs`.
+        - If `ncells` is not a positive integer.
     """
-    variance_explained = adata.uns['pca']['variance_ratio']
-    # Coordinates of all points
-    n_points = len(variance_explained)
-    all_coords = np.vstack((range(n_points), variance_explained)).T
-    # Line vector from first to last point
-    line_vec = all_coords[-1] - all_coords[0]
-    line_vec_norm = line_vec / np.sqrt(np.sum(line_vec**2))
-    # Vector being orthogonal to the line
-    vec_from_first = all_coords - all_coords[0]
-    scalar_prod = np.sum(vec_from_first * np.tile(line_vec_norm, (n_points, 1)), axis=1)
-    vec_from_first_parallel = np.outer(scalar_prod, line_vec_norm)
-    vec_to_line = vec_from_first - vec_from_first_parallel
-    # Distance to the line
-    dist_to_line = np.sqrt(np.sum(vec_to_line ** 2, axis=1))
-    # Index of the point with max distance to the line
-    elbow_idx = np.argmax(dist_to_line)
-    return elbow_idx
+    # Input Validation
+    if not isinstance(adata, ad.AnnData):
+        raise TypeError(f"'adata' must be an AnnData object, but got {type(adata)}.")
+    
+    if not isinstance(groupby, str):
+        raise TypeError(f"'groupby' must be a string, but got {type(groupby)}.")
+    
+    if groupby not in adata.obs.columns:
+        raise ValueError(f"'{groupby}' is not a column in adata.obs. Available columns are: {adata.obs.columns.tolist()}")
+    
+    if not isinstance(ncells, int) or ncells <= 0:
+        raise ValueError(f"'ncells' must be a positive integer, but got {ncells}.")
+    
+    # Compute the size of each group
+    group_sizes = adata.obs[groupby].value_counts()
+    
+    # Identify groups that meet or exceed the minimum cell threshold
+    valid_groups = group_sizes[group_sizes >= ncells].index.tolist()
+    
+    if not valid_groups:
+        raise ValueError(f"No groups found in '{groupby}' with at least {ncells} cells.")
+    
+    # Optionally, inform the user about the filtering
+    total_groups = adata.obs[groupby].nunique()
+    retained_groups = len(valid_groups)
+    excluded_groups = total_groups - retained_groups
+    print(f"Filtering AnnData object based on group sizes in '{groupby}':")
+    print(f" - Total groups: {total_groups}")
+    print(f" - Groups retained (≥ {ncells} cells): {retained_groups}")
+    print(f" - Groups excluded (< {ncells} cells): {excluded_groups}")
+    
+    # Create a boolean mask for cells belonging to valid groups
+    mask = adata.obs[groupby].isin(valid_groups)
+    
+    # Apply the mask to filter the AnnData object
+    filtered_adata = adata[mask].copy()
+    
+    # Optionally, reset indices if necessary
+    # filtered_adata.obs_names = range(filtered_adata.n_obs)
+    
+    print(f"Filtered AnnData object contains {filtered_adata.n_obs} cells from {filtered_adata.obs[groupby].nunique()} groups.")
+    
+    return filtered_adata
+
+
+
 

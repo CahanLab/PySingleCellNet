@@ -4,9 +4,28 @@ All notable changes to PySingleCellNet should be listed here. The definition of 
 
 ## [Unreleased]
 
+### Changed
+
+- replace cl with tl
+- moved functions to more fitting files, like unused ones to utils.misc.py
+- do not export unused functions
+
+### Added
+
+- tl.discover_cell_cliques labels cells by consensus cluster labels, kind of
+- tl.clustering_quality_vs_nn_summary computes metrics of clustering quality
+- tl.cluster_alot
+- resurrected gene clustering functions
+
+### Fixed
+
+- `filter_anndata_slots` to handle .uns and dependencies across slots
+
 ### Removed
 
-- lots o stuff that is old or has been moved to STUF
+- ut.mito_rib_heme
+- 
+- lots of stuff that is old or has been moved to other packages like STUF
 
 ## [0.1.2] - 2025-08-05
 

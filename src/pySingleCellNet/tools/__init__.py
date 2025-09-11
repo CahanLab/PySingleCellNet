@@ -1,7 +1,19 @@
+from .cluster import (
+    cluster_alot,
+    cluster_subclusters,
+)
+
+from .cluster_eval import (
+    clustering_quality_vs_nn_summary
+)
+
+from .cluster_cliques import ( 
+    discover_cell_cliques
+)
+
 from .classifier import (
     classify_anndata,
     train_classifier,
-    train_and_assess,
     create_classifier_report
 )
 
@@ -19,11 +31,23 @@ from .comparison import (
     deg
 )
 
+from .gene import (
+    build_gene_knn,
+    find_gene_modules,
+    whoare_genes_neighbors,
+    score_gene_modules,
+    what_module_has_gene,
+)
+
+
 # API
 __all__ = [
+    "cluster_alot",
+    "cluster_subcluster",
+    "clustering_quality_vs_nn_summary",
+    "discover_cell_cliques",
     "classify_anndata",
     "train_classifier",
-    "train_and_assess",
     "create_classifier_report",
     "categorize_classification",
     "comp_ct_thresh",
@@ -32,6 +56,11 @@ __all__ = [
     "gsea_on_deg",
     "collect_gsea_results_from_dict",
     "convert_diffExp_to_dict",
-    "deg"
+    "deg",
+    "build_gene_knn",
+    "find_gene_modules",
+    "whoare_genes_neighbors",
+    "score_gene_modules",
+    "what_module_has_gene",
 ]
 

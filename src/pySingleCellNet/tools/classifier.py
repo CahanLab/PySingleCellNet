@@ -3,8 +3,7 @@ import pandas as pd
 import scanpy as sc
 import anndata
 from anndata import AnnData
-from typing import List
-from typing import Dict
+from typing import List, Dict
 from sklearn.ensemble import RandomForestClassifier
 from scipy.sparse import csr_matrix
 import warnings
@@ -13,10 +12,51 @@ from alive_progress import alive_bar
 #from ..utils import *
 #from .tsp_rf import *
 #from .scn_assess import create_classifier_report
-from ..utils import build_knn_graph, rank_genes_subsets, get_unique_colors, split_adata_indices
+from ..utils import build_knn_graph, get_unique_colors, split_adata_indices
 from sklearn.metrics import classification_report
 from pySingleCellNet.config import SCN_DIFFEXP_KEY, SCN_CATEGORY_COLOR_DICT
 import random as rand 
+
+def _rank_genes_subsets(
+    adata,
+    groupby,
+    grpA,
+    grpB,
+    pval = 0.01,
+    layer=None
+):
+    """
+    Subset an AnnData object to specified groups, create a new .obs column labeling cells
+    as group A or B, and run rank_genes_groups for differential expression analysis. Necessary because the scanpy reference does not seem to work
+    
+    Parameters:
+        adata (AnnData): The AnnData object.
+        groupby (str): The .obs column to group cells by.
+        grpA (list): Values used to subset cells into group A.
+        grpB (list): Values used to subset cells into group B.
+        layer (str, optional): Layer to use for expression values.
+        
+    Returns:
+        AnnData: Subsetted and labeled AnnData object after running rank_genes_groups.
+    """
+    # Subset the data to cells in either grpA or grpB
+    subset = adata[adata.obs[groupby].isin(grpA + grpB)].copy()
+    # Create a new .obs column labeling cells as 'grpA' or 'grpB'
+    subset.obs["comparison_group"] = subset.obs[groupby].apply(
+        lambda x: "grpA" if x in grpA else "grpB"
+    )
+    # Run rank_genes_groups
+    sc.tl.rank_genes_groups(
+        subset,
+        groupby="comparison_group",
+        layer=layer,
+        pts = True,
+        use_raw=False
+    )
+    # return subset
+    ans = sc.get.rank_genes_groups_df(subset, group='grpA', pval_cutoff=pval)
+    return ans
+
 
 def _query_transform(expMat, genePairs):
     npairs = len(genePairs)
@@ -254,7 +294,7 @@ def _get_classy_genes_3(
         ]["name"]
         
         xdata = adata.copy()
-        subsetDF = rank_genes_subsets(
+        subsetDF = _rank_genes_subsets(
             xdata, groupby=groupby, grpA=[g], grpB=other_groups, layer=layer, pval = pval
         )
         
@@ -294,7 +334,7 @@ def _get_classy_genes_3(
             all_others = [x for x in groups if x != g]
             
             # E.g., run a fallback differential expression
-            fallbackDF = rank_genes_subsets(
+            fallbackDF = _rank_genes_subsets(
                 xdata_fallback, groupby=groupby, grpA=[g], grpB=all_others, layer=layer, pval=1
             )
             fallback_genes = get_top_genes_from_df(
@@ -684,7 +724,7 @@ def _generate_gene_pairs(
     # Convert to a NumPy array of unique values
     return np.unique(all_pairs)
 
-
+# deprecated 
 def train_and_assess(
     adata,
     groupby,
@@ -713,6 +753,8 @@ def train_and_assess(
         return c_report, clf
     else:
         return c_report
+
+
 
 
 

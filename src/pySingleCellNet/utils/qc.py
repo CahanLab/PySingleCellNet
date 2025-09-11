@@ -2,7 +2,36 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from anndata import AnnData
+from scipy.stats import median_abs_deviation
 # import anndata as ad
+
+def call_outlier_cells(adata, metric = ["total_counts"], nmads = 5):
+    """
+    determines whether obs[metric] exceeds nmads 
+     
+    Parameters:
+    -----------
+    adata : AnnData
+        The input AnnData object containing single-cell data.
+    metric : str
+        The column name in `adata.obs` holding cell metric 
+    nmads : int, optional (default=5)
+        The number of median abs deviations to define a cell as an outlier
+
+    Returns
+    -------
+    None
+        The function adds a new column to `adata.obs` named "outlier_" + metric, but does not return anything.
+    """
+    M = adata.obs[metric]
+    outlier = (M < np.median(M) - nmads * median_abs_deviation(M)) | (
+        np.median(M) + nmads * median_abs_deviation(M) < M
+    )
+
+    new_col = "outlier_" + nmads + "_" + metric
+    adata.obs[new_col] = outlier
+    
+
 
 # also see pl.umi_counts_ranked
 def find_knee_point(adata, total_counts_column="total_counts"):
@@ -12,7 +41,6 @@ def find_knee_point(adata, total_counts_column="total_counts"):
     Parameters:
         adata (AnnData): The input AnnData object.
         total_counts_column (str): Column in `adata.obs` containing total UMI counts. Default is "total_counts".
-        show (bool): If True, displays a log-log plot with the knee point. Default is True.
 
     Returns:
         float: The UMI count value at the knee point.
@@ -36,110 +64,6 @@ def find_knee_point(adata, total_counts_column="total_counts"):
     knee_point_value = sorted_umi_counts[knee_idx]
     
     return knee_point_value
-
-
-
-def mito_rib_heme(adQ: AnnData,
-                  species: str = "MM",
-                  clean: dict = None) -> AnnData:
-    """
-    Calculate mitochondrial, ribosomal, and hemoglobin QC metrics 
-    and add them to the `.var` attribute of the AnnData object.
-    
-    Parameters
-    ----------
-    adQ : AnnData
-        Annotated data matrix with observations (cells) and variables (features).
-    species : str, optional (default: "MM")
-        The species of the input data. Can be "MM" (Mus musculus) or "HS" (Homo sapiens).
-    clean : dict, optional (default: {'ribo': True, 'mt': True, 'heme': True})
-        Dictionary controlling whether to remove:
-          - 'ribo': ribosomal genes
-          - 'mt': mitochondrial genes
-          - 'heme': hemoglobin genes
-    
-    Returns
-    -------
-    AnnData
-        Annotated data matrix with QC metrics added to the `.var` attribute,
-        and optionally with certain gene classes removed.
-    """
-    # -------------------------
-    # 1. Set default if clean is None
-    # -------------------------
-    if clean is None:
-        clean = {'ribo': True, 'mt': True, 'heme': True}
-    else:
-        # Ensure all three keys exist; if not, set them to default True
-        for k in ['ribo', 'mt', 'heme']:
-            if k not in clean:
-                clean[k] = True
-    
-    # -------------------------
-    # 2. Copy the input data
-    # -------------------------
-    adata = adQ.copy()
-    
-    # -------------------------
-    # 3. Define gene prefixes based on species
-    # -------------------------
-    if species == 'MM':
-        # MOUSE
-        mt_prefix = "mt-"
-        ribo_prefix = ("Rps", "Rpl")
-        # Common mouse hemoglobin genes often start with 'Hba-' or 'Hbb-'
-        heme_prefix = ("Hba-", "Hbb-")
-    
-    else:
-        # HUMAN
-        mt_prefix = "MT-"
-        ribo_prefix = ("RPS", "RPL")
-        # Human hemoglobin genes typically start with 'HB...' 
-        # (HBA, HBB, HBD, HBE, HBG, HBZ, HBM, HBQ, etc.)
-        # Using just "HB" can be too broad in some annotations, 
-        # so here's a more explicit tuple:
-        heme_prefix = ("HBA", "HBB", "HBD", "HBE", "HBG", "HBZ", "HBM", "HBQ")
-    
-    # -------------------------
-    # 4. Flag MT, Ribo, and Heme genes in .var
-    # -------------------------
-    adata.var['mt'] = adata.var_names.str.startswith(mt_prefix)
-    adata.var['ribo'] = adata.var_names.str.startswith(ribo_prefix)
-    adata.var['heme'] = adata.var_names.str.startswith(heme_prefix)
-    
-    # -------------------------
-    # 5. Calculate QC metrics 
-    #    (Scanpy automatically calculates .var['total_counts'] etc.)
-    # -------------------------
-    sc.pp.calculate_qc_metrics(
-        adata,
-        qc_vars=['ribo', 'mt', 'heme'],
-        percent_top=None,
-        log1p=True,
-        inplace=True
-    )
-    
-    # -------------------------
-    # 6. Optionally remove genes
-    # -------------------------
-    remove_mask = np.zeros(adata.shape[1], dtype=bool)
-    
-    if clean['mt']:
-        remove_mask |= adata.var['mt'].values
-    if clean['ribo']:
-        remove_mask |= adata.var['ribo'].values
-    if clean['heme']:
-        remove_mask |= adata.var['heme'].values
-    
-    keep_mask = ~remove_mask
-    
-    adata = adata[:, keep_mask].copy()
-    
-    # -------------------------
-    # 7. Return the modified AnnData
-    # -------------------------
-    return adata
-
 
 
 def mito_rib(adQ: AnnData, species: str = "MM", log1p = True, clean: bool = True) -> AnnData:
@@ -196,8 +120,67 @@ def mito_rib(adQ: AnnData, species: str = "MM", log1p = True, clean: bool = True
     return adata
 
 
-
-
+def score_sex(
+    adata, 
+    y_genes=['Eif2s3y', 'Ddx3y', 'Uty'], 
+    x_inactivation_genes=['Xist', 'Tsix']
+):
+    """
+    Adds sex chromosome expression scores to an AnnData object.
+    
+    This function calculates two scores for each cell in a scRNA-seq AnnData object:
+      - Y_score: the sum of expression values for a set of Y-chromosome specific genes.
+      - X_inact_score: the sum of expression values for genes involved in X-chromosome inactivation.
+      
+    The scores are added to the AnnData object's `.obs` DataFrame with the keys 'Y_score' and 'X_inact_score'.
+    
+    Parameters
+    ----------
+    adata : AnnData
+        An AnnData object containing scRNA-seq data, with gene names in `adata.var_names`.
+    y_genes : list of str, optional
+        List of Y-chromosome specific marker genes (default is ['Eif2s3y', 'Ddx3y', 'Uty']).
+    x_inactivation_genes : list of str, optional
+        List of genes involved in X-chromosome inactivation (default is ['Xist', 'Tsix']).
+        
+    Raises
+    ------
+    ValueError
+        If none of the Y-specific or X inactivation genes are found in `adata.var_names`.
+    
+    Returns
+    -------
+    None
+        The function modifies the AnnData object in place by adding the score columns to `adata.obs`.
+    """
+    # Filter for genes that are available in the dataset.
+    available_y_genes = [gene for gene in y_genes if gene in adata.var_names]
+    available_x_genes = [gene for gene in x_inactivation_genes if gene in adata.var_names]
+    
+    if not available_y_genes:
+        raise ValueError("None of the Y-specific genes were found in the dataset.")
+    if not available_x_genes:
+        raise ValueError("None of the X inactivation genes were found in the dataset.")
+    
+    # Compute the sum of expression for the Y-specific genes.
+    y_expression = adata[:, available_y_genes].X
+    if hasattr(y_expression, "toarray"):
+        y_expression = y_expression.toarray()
+    adata.obs['Y_score'] = np.sum(y_expression, axis=1)
+    
+    # Compute the sum of expression for the X inactivation genes.
+    x_expression = adata[:, available_x_genes].X
+    if hasattr(x_expression, "toarray"):
+        x_expression = x_expression.toarray()
+    adata.obs['X_inact_score'] = np.sum(x_expression, axis=1)
+    
+    # Optionally, you could log some output:
+    print("Added 'Y_score' and 'X_inact_score' to adata.obs for {} cells.".format(adata.n_obs))
+    
+# Example usage:
+# Assuming 'adata' is your AnnData object:
+# add_sex_scores(adata)
+# print(adata.obs[['Y_score', 'X_inact_score']].head())
 
 
 
