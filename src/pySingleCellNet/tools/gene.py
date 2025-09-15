@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Dict, List, Union
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union, Callable
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -384,27 +384,495 @@ def whoare_genes_neighbors(
         return [gene_index[j] for j in topk]
 
 
-def score_gene_modules(
-    adata,
-    gene_dict: dict,
-    key_added: str = "module_scores"
-):
 
-    # Number of cells and clusters
-    n_cells = adata.shape[0]
-    # Initialize an empty matrix for scores
-    # scores_matrix = np.zeros((n_cells, n_clusters))
-    scores_df = pd.DataFrame(index=adata.obs_names)
-    # For each cluster, calculate the gene scores and store in the DataFrame
-    for cluster, genes in gene_dict.items():
-        score_name = cluster
-        sc.tl.score_genes(adata, gene_list=genes, score_name=score_name, use_raw=False)        
-        # Store the scores in the DataFrame
-        scores_df[score_name] = adata.obs[score_name].values
-        del(adata.obs[score_name])
-    # Assign the scores DataFrame to adata.obsm
-    obsm_name = key_added
-    adata.obsm[obsm_name] = scores_df
+GeneSetInput = Union[
+    Mapping[str, Sequence[str]],   # {"setA": [...], "setB": [...]}
+    Sequence[Sequence[str]],       # [[...], [...]] -> auto-named set_1, set_2, ...
+    str,                           # name of an adata.uns key mapping to dict[str, list[str]]
+]
+
+def score_gene_sets(
+    adata,
+    gene_sets: GeneSetInput,
+    *,
+    layer: Optional[str] = None,
+    # ---- value-based (existing) options ----
+    log_transform: bool = False,
+    clip_percentiles: Tuple[float, float] = (1.0, 99.0),
+    agg: Union[str, Callable[[np.ndarray], np.ndarray]] = "mean",
+    top_p: Optional[float] = 0.5,           # for agg="top_p_mean" (0<p<=1)
+    top_k: Optional[int] = None,            # for agg="top_k_mean"
+    # ---- rank-based (new) options ----
+    rank_method: Optional[str] = None,      # None | "auc" | "ucell"
+    rank_universe: Optional[Union[str, Sequence[str]]] = None,  # None | var column | list of genes
+    auc_max_rank: Union[int, float] = 0.05, # AUCell window: int = L, float=(0,1] fraction of universe
+    batch_size: int = 2048,                 # batch size for ranking
+    use_average_ranks: bool = False,        # use scipy.stats.rankdata (average ties); slower
+    # ---- misc ----
+    min_genes_per_set: int = 1,
+    case_insensitive: bool = False,
+    obs_prefix: Optional[str] = None,
+    return_dataframe: bool = True,
+) -> pd.DataFrame:
+    """Compute per-cell gene-set scores with both value-based and rank-based (AUCell/UCell) modes.
+
+    Value-based pipeline (when `rank_method is None`):
+      1) Optional log1p.
+      2) Per-gene percentile clipping (`clip_percentiles`).
+      3) Per-gene min–max scaling to [0, 1].
+      4) Aggregate across genes in each set per cell with
+         'mean' | 'median' | 'sum' | 'nonzero_mean' | 'top_p_mean' | 'top_k_mean' | callable.
+
+    Rank-based pipeline (when `rank_method in {'auc','ucell'}`):
+      • For each cell, rank genes within a chosen universe (`rank_universe`).
+      • 'auc'  : AUCell-style AUC in the top L ranks (L = `auc_max_rank`).
+      • 'ucell': normalized Mann–Whitney U statistic in [0,1].
+      • Ranks are computed in batches (`batch_size`) for memory efficiency.
+
+    Args:
+        adata: AnnData object.
+        gene_sets: Dict[name -> genes], list of gene lists (auto-named), or name of `adata.uns` key.
+        layer: Use `adata.layers[layer]` instead of `.X`.
+        log_transform: Apply `np.log1p` before scoring (safe monotone transform).
+        clip_percentiles: (low, high) clipping percentiles for value-based mode.
+        agg: Aggregation for value-based mode or a callable: (cells×genes) -> (cells,).
+        top_p: Fraction for 'top_p_mean' (0<p<=1).
+        top_k: Count for 'top_k_mean' (>=1).
+        rank_method: None | 'auc' | 'ucell' to switch to rank-based scoring.
+        rank_universe: None=all genes; or a boolean var column name (e.g. 'highly_variable');
+                       or an explicit list of gene names defining the ranking universe.
+        auc_max_rank: AUCell top window (int L) or fraction (0,1].
+        batch_size: Row batch size for rank computation.
+        use_average_ranks: If True, uses average-tie ranks (scipy.stats.rankdata); slower.
+        min_genes_per_set: Require at least this many present genes to score a set (else NaN).
+        case_insensitive: Case-insensitive gene matching against `var_names`.
+        obs_prefix: If provided, also writes scores to `adata.obs[f"{obs_prefix}{name}"]`.
+        return_dataframe: If True, return a DataFrame; else return ndarray.
+
+    Returns:
+        DataFrame (cells × sets) of scores (and optionally writes to `adata.obs`).
+
+    Notes:
+        • Rank-based scores ignore clipping/min–max (ranks are invariant to monotone transforms).
+        • AUCell output here is normalized to [0,1] within the top-L window.
+        • UCell output is the normalized U statistic in [0,1].
+    """
+    # ------- resolve gene_sets -> dict[name] -> list[str] -------
+    if isinstance(gene_sets, str):
+        if gene_sets not in adata.uns:
+            raise ValueError(f"gene_sets='{gene_sets}' not found in adata.uns")
+        gs_map = dict(adata.uns[gene_sets])
+    elif isinstance(gene_sets, Mapping):
+        gs_map = {str(k): list(v) for k, v in gene_sets.items()}
+    else:
+        gs_map = {f"set_{i+1}": list(v) for i, v in enumerate(gene_sets)}
+    if not gs_map:
+        raise ValueError("No gene sets provided.")
+
+    X = adata.layers[layer] if layer is not None else adata.X
+    n_cells, n_genes = X.shape
+    var_names = adata.var_names.astype(str)
+
+    # name lookup
+    if case_insensitive:
+        lut = {g.lower(): i for i, g in enumerate(var_names)}
+        def _loc(g: str) -> int: return lut.get(g.lower(), -1)
+    else:
+        lut = {g: i for i, g in enumerate(var_names)}
+        def _loc(g: str) -> int: return lut.get(g, -1)
+
+    # map each set to present indices (deduped)
+    present_idx: Dict[str, np.ndarray] = {}
+    for name, genes in gs_map.items():
+        idx = sorted({_loc(str(g)) for g in genes if _loc(str(g)) >= 0})
+        present_idx[name] = np.array(idx, dtype=int)
+
+    # ======================= RANK-BASED BRANCH =======================
+    if rank_method is not None:
+        method = rank_method.lower()
+        if method not in {"auc", "ucell"}:
+            raise ValueError("rank_method must be one of {None, 'auc', 'ucell'}.")
+
+        # pick universe
+        if rank_universe is None:
+            U_idx = np.arange(n_genes, dtype=int)
+        elif isinstance(rank_universe, str) and rank_universe in adata.var.columns:
+            mask = adata.var[rank_universe].astype(bool).to_numpy()
+            U_idx = np.where(mask)[0]
+        else:
+            # list-like of gene names
+            names = pd.Index(rank_universe)  # raises if not list-like; OK
+            U_idx = var_names.get_indexer(names)
+            U_idx = U_idx[U_idx >= 0]
+        if U_idx.size == 0:
+            raise ValueError("rank_universe resolved to 0 genes.")
+
+        # restrict sets to universe; build compact col map
+        pos_in_U = {j: k for k, j in enumerate(U_idx)}
+        set_cols_in_U: Dict[str, np.ndarray] = {}
+        for name, idx in present_idx.items():
+            idxU = idx[np.isin(idx, U_idx)]
+            if idxU.size < min_genes_per_set:
+                set_cols_in_U[name] = np.array([], dtype=int)
+            else:
+                set_cols_in_U[name] = np.array([pos_in_U[j] for j in idxU], dtype=int)
+
+        # slice universe matrix (cells × |U|)
+        Xu = X[:, U_idx].toarray() if sparse.issparse(X) else np.asarray(X)[:, U_idx]
+        if log_transform:
+            Xu = np.log1p(Xu)  # monotone; safe for ranks
+
+        # AUCell window
+        if method == "auc":
+            if isinstance(auc_max_rank, float):
+                if not (0 < auc_max_rank <= 1):
+                    raise ValueError("If auc_max_rank is float, it must be in (0,1].")
+                L = max(1, int(np.ceil(auc_max_rank * Xu.shape[1])))
+            else:
+                L = int(auc_max_rank)
+                if L < 1 or L > Xu.shape[1]:
+                    raise ValueError("auc_max_rank (int) must be in [1, n_universe].")
+
+        # prepare output
+        scores = {name: np.full(n_cells, np.nan, float) for name in gs_map.keys()}
+
+        # optional average-tie ranks
+        if use_average_ranks:
+            from scipy.stats import rankdata  # local import; slower but exact ties
+
+        # rank batches
+        for start in range(0, n_cells, batch_size):
+            end = min(n_cells, start + batch_size)
+            A = Xu[start:end, :]  # (b × nU)
+
+            if use_average_ranks:
+                # ranks ascending: 1..nU (average ties). Loop rows for stability.
+                ranks_asc = np.vstack([rankdata(row, method="average") for row in A]).astype(np.float64)
+                ranks_desc = A.shape[1] + 1 - ranks_asc
+            else:
+                # fast ordinal ranks via double argsort (stable)
+                order = np.argsort(A, axis=1, kind="mergesort")
+                ranks_asc = np.empty_like(order, dtype=np.int32)
+                row_indices = np.arange(order.shape[0])[:, None]
+                ranks_asc[row_indices, order] = np.arange(1, A.shape[1] + 1, dtype=np.int32)
+                ranks_desc = A.shape[1] - ranks_asc + 1
+
+            if method == "ucell":
+                nU = A.shape[1]
+                for name, cols in set_cols_in_U.items():
+                    m = cols.size
+                    if m < min_genes_per_set:
+                        continue
+                    r = ranks_asc[:, cols].astype(np.float64)         # (b × m)
+                    U = r.sum(axis=1) - (m * (m + 1) / 2.0)          # Mann–Whitney U
+                    denom = m * (nU - m)
+                    out = np.zeros(U.shape[0], float)
+                    np.divide(U, denom, out=out, where=denom > 0)    # normalized to [0,1]
+                    scores[name][start:end] = out
+
+            else:  # AUCell
+                Lloc = L
+                for name, cols in set_cols_in_U.items():
+                    m_all = cols.size
+                    if m_all < min_genes_per_set:
+                        continue
+                    r = ranks_desc[:, cols]                           # (b × m)
+                    mask = (r <= Lloc)
+                    contrib = (Lloc - r + 1) * mask                   # triangular weights
+                    raw = contrib.sum(axis=1)
+                    m_prime = min(m_all, Lloc)
+                    max_raw = m_prime * Lloc - (m_prime * (m_prime - 1)) / 2.0
+                    out = np.zeros(raw.shape[0], float)
+                    np.divide(raw, max_raw, out=out, where=max_raw > 0)  # normalize to [0,1]
+                    scores[name][start:end] = out
+
+        df = pd.DataFrame(scores, index=adata.obs_names)
+        if obs_prefix:
+            for k in df.columns:
+                adata.obs[f"{obs_prefix}{k}"] = df[k].values
+        return df if return_dataframe else df.values
+
+    # ======================= VALUE-BASED BRANCH =======================
+    # collect unique indices across all sets
+    all_idx: List[int] = []
+    for idx in present_idx.values():
+        all_idx.extend(idx.tolist())
+    uniq_idx = np.array(sorted(set(all_idx)), dtype=int)
+    if uniq_idx.size == 0:
+        raise ValueError("None of the provided genes are present in adata.var_names.")
+
+    # slice (cells × uniq_genes), densify for percentiles
+    Xu = X[:, uniq_idx].toarray() if sparse.issparse(X) else np.asarray(X)[:, uniq_idx]
+
+    # optional log1p
+    if log_transform:
+        Xu = np.log1p(Xu)
+
+    # per-gene clip + scale to [0,1]
+    lo_p, hi_p = float(clip_percentiles[0]), float(clip_percentiles[1])
+    if not (0.0 <= lo_p < hi_p <= 100.0):
+        raise ValueError("clip_percentiles must satisfy 0 <= low < high <= 100.")
+    lo = np.percentile(Xu, lo_p, axis=0)
+    hi = np.percentile(Xu, hi_p, axis=0)
+    Xu = np.clip(Xu, lo[None, :], hi[None, :])
+    denom = (hi - lo)
+    denom[denom <= 0] = np.inf
+    Xu = (Xu - lo[None, :]) / denom[None, :]
+    Xu = np.where(np.isfinite(Xu), Xu, 0.0)
+
+    # compact column map
+    compact = {j: k for k, j in enumerate(uniq_idx)}
+
+    # row-wise helpers
+    def _row_topk_mean(A: np.ndarray, k: int) -> np.ndarray:
+        if k <= 0: return np.zeros(A.shape[0], dtype=float)
+        k = min(k, A.shape[1])
+        idx = A.shape[1] - k
+        part = np.partition(A, idx, axis=1)
+        return part[:, -k:].mean(axis=1)
+
+    def _row_nonzero_mean(A: np.ndarray) -> np.ndarray:
+        mask = (A > 0)
+        num = A.sum(axis=1)
+        den = mask.sum(axis=1)
+        out = np.zeros(A.shape[0], float)
+        np.divide(num, den, out=out, where=den > 0)
+        return out
+
+    # pick aggregator
+    if isinstance(agg, str):
+        agg_l = agg.lower()
+        if agg_l == "mean":
+            agg_fn = lambda A: A.mean(axis=1)
+        elif agg_l == "median":
+            agg_fn = lambda A: np.median(A, axis=1)
+        elif agg_l == "sum":
+            agg_fn = lambda A: A.sum(axis=1)
+        elif agg_l == "nonzero_mean":
+            agg_fn = _row_nonzero_mean
+        elif agg_l == "top_p_mean":
+            if top_p is None or not (0 < float(top_p) <= 1):
+                raise ValueError("For agg='top_p_mean', provide 0 < top_p <= 1.")
+            def agg_fn(A, _p=float(top_p)):
+                k = max(1, int(np.ceil(_p * A.shape[1])))
+                return _row_topk_mean(A, k)
+        elif agg_l == "top_k_mean":
+            if top_k is None or int(top_k) < 1:
+                raise ValueError("For agg='top_k_mean', provide top_k >= 1.")
+            agg_fn = lambda A, _k=int(top_k): _row_topk_mean(A, _k)
+        else:
+            raise ValueError("agg must be 'mean','median','sum','nonzero_mean','top_p_mean','top_k_mean' or a callable.")
+    elif callable(agg):
+        agg_fn = lambda A: agg(A)
+    else:
+        raise ValueError("Invalid 'agg' argument.")
+
+    # aggregate per set
+    out = {}
+    for name, idx in present_idx.items():
+        if idx.size < min_genes_per_set:
+            out[name] = np.full(n_cells, np.nan, dtype=float)
+            continue
+        cols = [compact[j] for j in idx]
+        A = Xu[:, cols]  # (cells × genes_in_set)
+        out[name] = agg_fn(A)
+
+    df = pd.DataFrame(out, index=adata.obs_names)
+    if obs_prefix:
+        for k in df.columns:
+            adata.obs[f"{obs_prefix}{k}"] = df[k].values
+    return df if return_dataframe else df.values
+
+
+
+def subset_modules_top_genes(
+    adata,
+    top_n: int = 20,
+    uns_key: str = "knn_modules",
+    *,
+    method: str = "auto",              # "auto", "corr"
+    use_abs: bool = True,              # use |r| when scoring by correlation
+    layer: Optional[str] = None,       # override: expression layer to use
+    mean_cluster: Optional[bool] = None,
+    groupby: Optional[str] = None,
+    max_profiles: Optional[int] = 2000,  # downsample rows (cells) for speed if not mean_cluster
+    random_state: Optional[int] = 0,
+    return_scores: bool = False,
+) -> Union[Dict[str, List[str]], Tuple[Dict[str, List[str]], pd.DataFrame]]:
+    """Select the top-N most similar genes per module for compact visualization.
+
+    This function takes the gene modules saved by :func:`find_gene_modules`
+    (typically under ``adata.uns['knn_modules']``) and returns, for each module,
+    the top ``top_n`` genes ranked by within-module similarity.
+
+    Similarity is defined as the **mean correlation** of a gene to the other genes
+    in its module, computed across profiles (cells or group means). If your modules
+    were produced with ``order_genes_by_within_module_connectivity=True``, then
+    ``method="auto"`` will simply slice the first ``top_n`` genes from each module
+    (fast path). Otherwise, a correlation-based score is computed.
+
+    Args:
+        adata (AnnData): The annotated data matrix.
+        top_n (int): Number of genes to keep per module. Defaults to 20.
+        uns_key (str): ``.uns`` key holding the modules dict (``{module: [genes...]}``).
+            Defaults to ``"knn_modules"``.
+        method (str, optional): Similarity method.
+            - ``"auto"``: If modules are already ordered by connectivity (as saved by
+              :func:`find_gene_modules`), slice the first ``top_n`` genes; otherwise
+              compute correlation-based scores.
+            - ``"corr"``: Always compute mean (absolute) Pearson correlation within
+              each module.
+            Defaults to ``"auto"``.
+        use_abs (bool, optional): Use absolute correlation (|r|) when scoring.
+            Defaults to True.
+        layer (str, optional): Expression layer to use. If not provided, this function
+            will try to use the layer recorded in ``adata.uns[f"{uns_key}__meta"]["layer"]``,
+            otherwise falls back to ``adata.X``.
+        mean_cluster (bool, optional): If True, compute similarity on group means
+            (matching how modules were built when ``mean_cluster=True``). If None,
+            attempts to read from ``{uns_key}__meta``; defaults to False otherwise.
+        groupby (str, optional): Column in ``.obs`` used to group cells when
+            ``mean_cluster=True``. If None, attempts to read from ``{uns_key}__meta``.
+        max_profiles (int, optional): When ``mean_cluster=False`` and the number of rows
+            (cells) is very large, downsample to this many profiles for speed.
+            Set to ``None`` to disable downsampling. Defaults to 2000.
+        random_state (int, optional): Seed for row downsampling. Defaults to 0.
+        return_scores (bool, optional): If True, also return a long-form DataFrame with
+            per-gene scores and ranks. Defaults to False.
+
+    Returns:
+        Dict[str, List[str]]: Mapping of module name to the selected top genes (ordered).
+        If ``return_scores=True``, also returns a ``pandas.DataFrame`` with columns:
+        ``['module', 'gene', 'score', 'rank']``.
+
+    Raises:
+        ValueError: If ``uns_key`` is not found or not a dict, if required metadata
+            is missing for mean-clustered scoring, or if no genes are found.
+
+    Notes:
+        * Correlation-based scoring operates on a **dense** slice of the expression
+          matrix restricted to the genes of each module; the work is done per module
+          to keep memory use reasonable.
+        * If your modules were created with ``mean_cluster=True``, correlation is
+          computed on the **group means** for stability and speed.
+
+    Examples:
+        >>> top = subset_modules_top_genes(adata, top_n=15, uns_key="knn_modules")
+        >>> # Or, get scores as well:
+        >>> top, scores = subset_modules_top_genes(adata, top_n=10, return_scores=True)
+        >>> scores.head()
+    """
+    # --- fetch modules & metadata ---
+    if uns_key not in adata.uns or not isinstance(adata.uns[uns_key], dict):
+        raise ValueError(f"Expected adata.uns['{uns_key}'] to be a dict of modules.")
+    modules: Dict[str, List[str]] = adata.uns[uns_key]
+    meta = adata.uns.get(f"{uns_key}__meta", {})
+
+    # Defaults from metadata (if present)
+    if layer is None:
+        layer = meta.get("layer", None)
+    if mean_cluster is None:
+        mean_cluster = bool(meta.get("mean_cluster", False))
+    if groupby is None:
+        groupby = meta.get("groupby", None)
+
+    ordered_by_conn = bool(meta.get("ordered_by_within_module_connectivity", False))
+
+    # Fast path: already ordered by connectivity & method='auto'
+    if method == "auto" and ordered_by_conn and not return_scores:
+        return {m: genes[:top_n] for m, genes in modules.items()}
+
+    # Determine expression matrix
+    X = adata.layers[layer] if layer is not None else adata.X
+
+    # Build the profile-by-gene matrix we'll use for correlation
+    if mean_cluster:
+        if groupby is None or groupby not in adata.obs.columns:
+            raise ValueError(
+                "mean_cluster=True but 'groupby' is not provided and not found in metadata."
+            )
+        if hasattr(sc.get, "aggregate"):
+            ad_agg = sc.get.aggregate(adata, by=groupby, func="mean")
+            M = ad_agg.layers["mean"]  # (n_groups x n_genes)
+        else:
+            # Manual group means (sparse-aware)
+            groups = adata.obs[groupby].astype("category")
+            codes = groups.cat.codes.to_numpy()
+            n_groups = groups.cat.categories.size
+            G = sparse.csr_matrix((np.ones(adata.n_obs), (np.arange(adata.n_obs), codes)),
+                                  shape=(adata.n_obs, n_groups))
+            if sparse.issparse(X):
+                sums = G.T @ X
+            else:
+                sums = (G.T @ sparse.csr_matrix(X)).toarray()
+            counts = np.asarray(G.sum(axis=0)).ravel() + 1e-12
+            M = sums / counts[:, None]  # (n_groups x n_genes)
+    else:
+        M = X
+        # Optionally downsample rows (cells) for speed
+        if (max_profiles is not None) and (M.shape[0] > max_profiles):
+            rng = np.random.default_rng(random_state)
+            idx = rng.choice(M.shape[0], size=max_profiles, replace=False)
+            M = M[idx, :]
+
+    var_index = pd.Index(adata.var_names)
+    rng = np.random.default_rng(random_state)
+
+    top_dict: Dict[str, List[str]] = {}
+    score_rows: List[Dict[str, Union[str, float, int]]] = []
+
+    # Helper: compute per-gene mean correlation to others inside a module
+    def _scores_from_corr(Y: np.ndarray) -> np.ndarray:
+        if Y.shape[1] == 1:
+            return np.array([0.0], dtype=float)
+        C = np.corrcoef(Y, rowvar=False)
+        if use_abs:
+            C = np.abs(C)
+        np.fill_diagonal(C, np.nan)
+        s = np.nanmean(C, axis=1)
+        return np.nan_to_num(s, nan=0.0)
+
+    # Compute scores module-by-module
+    for mod, gene_list in modules.items():
+        # Only keep genes present in adata
+        genes_present = [g for g in gene_list if g in var_index]
+        if not genes_present:
+            top_dict[mod] = []
+            continue
+
+        idx = var_index.get_indexer(genes_present)
+
+        # Extract submatrix (profiles x module_genes) and densify
+        if sparse.issparse(M):
+            Y = M[:, idx].toarray()
+        else:
+            Y = np.asarray(M)[:, idx]
+
+        # Decide method (currently 'corr' or the auto fallback)
+        # (Connectivity-based scoring is not attempted here because the gene graph
+        #  isn't stored on the parent AnnData; modules may already be in that order.)
+        scores = _scores_from_corr(Y)
+
+        order = np.argsort(-scores)
+        k = min(top_n, len(genes_present))
+        keep = [genes_present[i] for i in order[:k]]
+        top_dict[mod] = keep
+
+        if return_scores:
+            for rank, i in enumerate(order, start=1):
+                score_rows.append({
+                    "module": mod,
+                    "gene": genes_present[i],
+                    "score": float(scores[i]),
+                    "rank": int(rank),
+                })
+
+    if return_scores:
+        score_df = pd.DataFrame(score_rows)
+        return top_dict, score_df
+    return top_dict
+
+
 
 
 def what_module_has_gene(
@@ -416,9 +884,6 @@ def what_module_has_gene(
         raise ValueError(mod_slot + " have not been identified.")
     genemodules = adata.uns[mod_slot]
     return [key for key, genes in genemodules.items() if target_gene in genes]
-
-
-
 
 
 

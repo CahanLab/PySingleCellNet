@@ -268,30 +268,123 @@ def _evaluate_one_partition(
 # ---------- public multi-run function ----------
 def clustering_quality_vs_nn_summary(
     adata,
-    label_cols: Sequence[str],                          # NEW: list of .obs columns
+    label_cols: Sequence[str],
     n_genes: int = 5,
-    naive: dict = {"p_val": 1e-2, "fold_change": 0.5},  # FDR threshold & log2FC
+    naive: dict = {"p_val": 1e-2, "fold_change": 0.5},
     strict: dict = {"minpercentin": 0.20, "maxpercentout": 0.10, "p_val": 0.01},
     n_pcs_for_nn: int = 30,
-    # matrix / masking / MTC
     has_log1p: bool = True,
     gene_mask_col: Optional[str] = None,
     layer: Optional[str] = None,
     p_adjust_method: str = "fdr_bh",
-    # speed/behavior
-    deduplicate_partitions: bool = True,                # skip identical clusterings
-    return_pairs: bool = False,                         # return per-run pair tables
+    deduplicate_partitions: bool = True,
+    return_pairs: bool = False,
 ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]]:
-    """
-    Compute clustering-quality metrics for each .obs label column and return
-    a single DataFrame (one row per labeling). Optionally return per-pair tables
-    in a dict keyed by label column.
+    """Summarize clustering quality across multiple label columns.
 
-    Speed-ups:
-      * Reuses one PCA/embedding for NN detection across all runs.
-      * Deduplicates identical partitions (up to relabeling) so each unique
-        clustering is evaluated once and the result shared.
+    Computes clustering-quality metrics for each `.obs` label column in
+    ``label_cols`` and returns a single summary table (one row per labeling).
+    Optionally returns per–cluster-pair differential-expression tables for each
+    labeling. A single PCA/neighbor graph (using ``n_pcs_for_nn`` PCs) is
+    reused across runs, and identical partitions (up to relabeling) can be
+    deduplicated for speed.
+
+    The method evaluates per-cluster marker genes under two regimes:
+
+    * **Naive:** rank by test statistic and select the top ``n_genes`` that meet
+      the naive thresholds (e.g., unadjusted ``p_val`` and minimum ``fold_change``).
+    * **Strict:** apply stricter filters on expression prevalence inside vs.
+      outside the cluster (``minpercentin`` / ``maxpercentout``) and an adjusted
+      p-value cutoff (``p_val`` after ``p_adjust_method``), then count genes.
+
+    Args:
+        adata: AnnData object containing count/expression data. Uses
+            ``adata.X`` or the specified ``layer``; cluster labels must be in
+            ``adata.obs``.
+        label_cols: Names of ``adata.obs`` columns whose clusterings will be
+            evaluated (e.g., ``["leiden_0.2", "leiden_0.5"]``).
+        n_genes: Number of top genes to consider per cluster in the naive regime
+            (after applying naive thresholds). Defaults to ``5``.
+        naive: Thresholds for the naive regime. Expected keys:
+            - ``"p_val"`` (float): Maximum unadjusted p-value.
+            - ``"fold_change"`` (float): Minimum log2 fold-change.
+            Defaults to ``{"p_val": 1e-2, "fold_change": 0.5}``.
+        strict: Thresholds for the strict regime. Expected keys:
+            - ``"minpercentin"`` (float): Minimum fraction of cells within the
+              cluster expressing the gene.
+            - ``"maxpercentout"`` (float): Maximum fraction of cells outside the
+              cluster expressing the gene.
+            - ``"p_val"`` (float): Maximum **adjusted** p-value (per
+              ``p_adjust_method``).
+            Defaults to
+            ``{"minpercentin": 0.20, "maxpercentout": 0.10, "p_val": 0.01}``.
+        n_pcs_for_nn: Number of principal components to use when building the
+            neighbor graph used for nearest-neighbor detection. Defaults to ``30``.
+        has_log1p: Whether the data are already log1p-transformed. If ``False``,
+            the implementation may log1p-transform counts before testing.
+            Defaults to ``True``.
+        gene_mask_col: Optional name of a boolean column in ``adata.var`` used to
+            mask genes prior to testing (e.g., to restrict to HVGs or exclude
+            mitochondrial genes). If ``None``, no mask is applied. Defaults to
+            ``None``.
+        layer: Name of an ``adata.layers`` matrix to use instead of ``adata.X``.
+            For example, ``"log1p"`` or ``"counts"``. Defaults to ``None``.
+        p_adjust_method: Method for multiple testing correction (e.g., ``"fdr_bh"``).
+            Passed to the underlying p-value adjustment routine. Defaults to ``"fdr_bh"``.
+        deduplicate_partitions: If ``True``, detect and skip evaluations for
+            labelings that produce the same partition (up to label renaming),
+            reusing the computed result. Defaults to ``True``.
+        return_pairs: If ``True``, also return a dict of per–cluster-pair result
+            tables keyed by the label column. Each value is a ``pd.DataFrame``
+            with pairwise statistics for that labeling. Defaults to ``False``.
+
+    Returns:
+        Union[pd.DataFrame, Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]]:  
+
+        * **summary** (``pd.DataFrame``): One row per labeling with columns such as:
+          - ``label_col``: The label column name.
+          - ``n_clusters``: Number of clusters in the labeling.
+          - ``n_pairs``: Number of cluster pairs evaluated.
+          - ``tested_genes``: Number of genes tested after masking.
+          - ``unique_naive_genes`` / ``unique_strict_genes``: Count of genes
+            uniquely satisfying naive/strict criteria.
+          - ``frac_pairs_with_at_least_n_strict``: Fraction of cluster pairs with
+            ≥ *n* strict marker genes (exact column name may reflect *n*).
+          - Additional min/max/median summaries for naive/strict exclusivity per pair.
+        * **pairs_by_label** (``Dict[str, pd.DataFrame]``, optional): Returned
+          only when ``return_pairs=True``. For each labeling, a DataFrame of
+          per–cluster-pair statistics and gene sets.
+
+    Raises:
+        KeyError: If any entry in ``label_cols`` is not found in ``adata.obs``,
+            or if ``gene_mask_col`` is provided but not found in ``adata.var``.
+        ValueError: If required keys are missing from ``naive`` or ``strict``,
+            if ``n_genes`` < 1, or if ``p_adjust_method`` is unsupported.
+        RuntimeError: If neighbor graph construction or differential testing fails.
+
+    Notes:
+        * The function does not modify ``adata`` in place (beyond any cached
+          neighbor graph/PCs if your implementation chooses to store them).
+        * For reproducibility, set any random seeds used by the nearest-neighbor
+          or clustering components upstream.
+
+    Examples:
+        >>> summary = clustering_quality_vs_nn_summary(
+        ...     adata,
+        ...     label_cols=["leiden_0.2", "leiden_0.5"],
+        ...     n_genes=10,
+        ...     strict={"minpercentin": 0.25, "maxpercentout": 0.05, "p_val": 0.01},
+        ... )
+        >>> summary[["label_col", "n_clusters", "unique_strict_genes"]].head()
+
+        >>> summary, pairs = clustering_quality_vs_nn_summary(
+        ...     adata,
+        ...     label_cols=["leiden_0.5"],
+        ...     return_pairs=True,
+        ... )
+        >>> pairs["leiden_0.5"].head()
     """
+
     if not label_cols:
         raise ValueError("Provide at least one column in `label_cols`.")
 

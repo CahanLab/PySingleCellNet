@@ -4,6 +4,8 @@ All notable changes to PySingleCellNet should be listed here. The definition of 
 
 ## [Unreleased]
 
+## [0.1.3] - 2025-09-15
+
 ### Changed
 
 - replace cl with tl
@@ -15,16 +17,18 @@ All notable changes to PySingleCellNet should be listed here. The definition of 
 - tl.discover_cell_cliques labels cells by consensus cluster labels, kind of
 - tl.clustering_quality_vs_nn_summary computes metrics of clustering quality
 - tl.cluster_alot
-- resurrected gene clustering functions
+- tl.cluster_subcluster
+- resurrected gene clustering functions 
+- notebook tutorial on cell clustering
 
 ### Fixed
 
 - `filter_anndata_slots` to handle .uns and dependencies across slots
+- `classify_anndata` bug that prevented writing h5ad. see https://github.com/CahanLab/PySingleCellNet/issues/13
 
 ### Removed
 
 - ut.mito_rib_heme
-- 
 - lots of stuff that is old or has been moved to other packages like STUF
 
 ## [0.1.2] - 2025-08-05

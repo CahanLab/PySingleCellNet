@@ -13,53 +13,101 @@ def cluster_alot(
     prefix: str = "autoc",
     pca_params: Optional[Dict[str, Any]] = None,
     knn_params: Optional[Dict[str, Any]] = None,
-    random_state: Optional[int] = None,   # seed for PC subsampling
-    overwrite: bool = True,               # overwrite .obs keys if they already exist
-    verbose: bool = True,                 # print progress lines
+    random_state: Optional[int] = None,
+    overwrite: bool = True,
+    verbose: bool = True,
 ) -> pd.DataFrame:
-    """
-    Grid-search Leiden clusterings over (n_pcs, n_neighbors, resolution), with optional
-    random PC subsampling for KNN construction.
+    """Grid-search Leiden clusterings over (n_pcs, n_neighbors, resolution).
+
+    Runs a parameter sweep that combines different numbers of principal components,
+    k-nearest-neighbor sizes, and Leiden resolutions. Optionally performs random
+    *PC subsampling* (within the first ``N`` PCs) when constructing the KNN graph,
+    repeating each configuration multiple times for robustness. Cluster labels
+    are written to ``adata.obs`` under keys derived from ``prefix`` and the
+    parameter settings.
 
     Assumptions:
-      - adata.X is already log-transformed
-      - PCA has been run and `adata.obsm['X_pca']` exists (use this as base)
+        * ``adata.X`` is **already log-transformed**.
+        * PCA has been computed and ``adata.obsm['X_pca']`` is present; this is
+          used as the base embedding for PC selection/subsampling.
 
-    Parameters
-    ----------
-    adata : AnnData
-    leiden_resolutions : list of float
-        Resolutions to pass to sc.tl.leiden.
-    prefix : str, default "autoc"
-        Prefix for .obs key names that store cluster labels.
-    pca_params : dict
-        {
-          'top_n_pcs': List[int] (default [40]),
-          'percent_of_pcs': Optional[float] (default None; if set, 0<val<=1),
-          'n_random_samples': Optional[int] (default None; # repeats per (n_pcs, n_neighbors))
-        }
-        If percent_of_pcs is set and 0<val<1 and n_random_samples>=1, for each top_n_pcs=N
-        we randomly select round(percent_of_pcs * N) PCs from the first N and build the KNN
-        on that subset, repeating n_random_samples times.
-        If percent_of_pcs is None (or ==1), we simply use the first N PCs.
-    knn_params : dict
-        {
-          'n_neighbors': List[int] (default [10])
-        }
-    random_state : int or None
-        Seed for PC subsampling reproducibility.
-    overwrite : bool
-        If False and a would-be .obs key exists, that run is skipped.
-    verbose : bool
-        If True, prints progress.
+    Args:
+        adata: AnnData object containing the log-transformed expression matrix.
+            Must include ``obsm['X_pca']`` (shape ``(n_cells, n_pcs_total)``).
+        leiden_resolutions: Leiden resolution values to evaluate (passed to
+            ``sc.tl.leiden``). Each resolution is combined with every KNN/PC
+            configuration in the sweep.
+        prefix: String prefix used to construct output keys for cluster labels in
+            ``adata.obs`` (e.g., ``"{prefix}_pc{N}_k{K}_res{R}"``). Defaults to
+            ``"autoc"``.
+        pca_params: Configuration for PC selection and optional subsampling.
+            Supported keys:
+            * ``"top_n_pcs"`` (List[int], default ``[40]``): Candidate values
+              for the maximum PC index ``N`` (i.e., use the first ``N`` PCs).
+            * ``"percent_of_pcs"`` (Optional[float], default ``None``): If set
+              with ``0 < value <= 1``, randomly select
+              ``round(value * N)`` PCs **from the first ``N``** for KNN
+              construction. If ``None`` or ``1``, use the first ``N`` PCs
+              without subsampling.
+            * ``"n_random_samples"`` (Optional[int], default ``None``): Number
+              of random PC subsets to draw **per (N, K)** when
+              ``percent_of_pcs`` is set in ``(0, 1)``. If ``None`` or less than
+              1, no repeated subsampling is performed.
+        knn_params: KNN graph parameters. Supported keys:
+            * ``"n_neighbors"`` (List[int], default ``[10]``): Candidate values
+              for ``K`` used in ``sc.pp.neighbors``.
+        random_state: Random seed for PC subset sampling (when
+            ``percent_of_pcs`` is used). Pass ``None`` for non-deterministic
+            sampling. Defaults to ``None``.
+        overwrite: If ``True`` (default), overwrite existing ``adata.obs`` keys
+            produced by previous runs that match the constructed names. If
+            ``False``, skip runs whose target keys already exist.
+        verbose: If ``True`` (default), print progress messages for each run.
 
-    Returns
-    -------
-    pd.DataFrame
-        One row per clustering run with columns:
-        ['obs_key','neighbors_key','resolution','top_n_pcs','pct_pcs','sample_idx',
-         'n_neighbors','n_clusters','pcs_used_count']
+    Returns:
+        pd.DataFrame:  
+
+        * **runs** (``pd.DataFrame``): One row per clustering run with metadata columns such as:
+          - ``obs_key``: Name of the column in ``adata.obs`` that stores cluster labels.
+          - ``neighbors_key``: Name of the neighbors graph key used/created.
+          - ``resolution``: Leiden resolution value used for the run.
+          - ``top_n_pcs``: Number of leading PCs considered.
+          - ``pct_pcs``: Fraction of PCs used when subsampling (``percent_of_pcs``), or ``1.0`` if all were used.
+          - ``sample_idx``: Index of the PC subsampling repeat (``0..n-1``) or ``0`` if no subsampling.
+          - ``n_neighbors``: Number of neighbors (``K``) used in KNN construction.
+          - ``n_clusters``: Number of clusters returned by Leiden for that run.
+          - ``pcs_used_count``: Actual number of PCs used to build the KNN graph
+            (``round(pct_pcs * top_n_pcs)`` or ``top_n_pcs`` if no subsampling).
+
+    Raises:
+        KeyError: If ``'X_pca'`` is missing from ``adata.obsm``.
+        ValueError: If any provided parameter is out of range (e.g.,
+            ``percent_of_pcs`` not in ``(0, 1]``; empty lists; non-positive
+            ``n_neighbors``).
+        RuntimeError: If neighbor graph construction or Leiden clustering fails.
+
+    Notes:
+        * This function **modifies** ``adata`` in place by adding cluster label
+          columns to ``adata.obs`` (and potentially adding or reusing neighbor
+          graphs in ``adata.obsp`` / ``adata.uns`` with a constructed
+          ``neighbors_key``).
+        * To ensure reproducibility when using PC subsampling, set
+          ``random_state`` and keep other sources of randomness (e.g., parallel
+          BLAS) controlled in your environment.
+
+    Examples:
+        >>> runs = cluster_alot(
+        ...     adata,
+        ...     leiden_resolutions=[0.1, 0.25, 0.5],
+        ...     pca_params={"top_n_pcs": [20, 40],
+        ...                 "percent_of_pcs": 0.5,
+        ...                 "n_random_samples": 3},
+        ...     knn_params={"n_neighbors": [10, 20]},
+        ...     random_state=42,
+        ... )
+        >>> runs[["obs_key", "n_clusters"]].head()
     """
+
     # ---- Validate prerequisites ----
     if "X_pca" not in adata.obsm:
         raise ValueError("`adata.obsm['X_pca']` not found. Please run PCA first.")
@@ -304,15 +352,6 @@ def cluster_subclusters(
         # Prefix subcluster labels and write back
         new_labels = orig + "_" + sub.obs['leiden_sub'].astype(str)
         adata.obs.loc[mask, subcluster_col_name] = new_labels.values
-
-
-
-
-
-
-
-
-
 
 
 

@@ -21,13 +21,12 @@ from .spatial import (
 from .dot import (    
     umi_counts_ranked,
     ontogeny_graph,
-    dotplot_deg,
-    dotplot_diff_gene,
     dotplot_scn_scores,
     umap_scores,
 )
 
 from .heatmap import (
+    heatmap_clustering_eval,
     heatmap_classifier_report,
     heatmap_scores,
     heatmap_gsea,
@@ -53,10 +52,9 @@ __all__ = [
     "bar_classifier_f1",
     "umi_counts_ranked",
     "ontogeny_graph",
-    "dotplot_deg",
-    "dotplot_diff_gene",
     "dotplot_scn_scores",
     "umap_scores",
+    "heatmap_clustering_eval",
     "heatmap_classifier_report",
     "heatmap_scores",
     "heatmap_gsea",

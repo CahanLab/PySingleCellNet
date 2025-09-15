@@ -1,10 +1,10 @@
-The easiest way to install PySingleCellNet is available on PyPI. Install it from there with:
+PySingleCellNet is available on PyPI. You can install it with:
 
 ```
 pip install pySingleCellNet
 ```
 
-Alternatively, you can install directly from GitHub with: 
+You could also install it directly from GitHub with: 
 
 ```shell
 pip install git+https://github.com/CahanLab/pySingleCellNet.git

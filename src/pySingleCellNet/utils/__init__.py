@@ -14,11 +14,11 @@ from .adataTools import (
     filter_adata_by_group_size
 )
 
-from .gene import (
+#from .gene import (
 #    extract_top_bottom_genes,
 #    pull_out_genes,
 #    pull_out_genes_v2,
-)
+#)
 
 #from .cell import (
 #)
@@ -56,10 +56,9 @@ __all__ = [
     "remove_genes",
     "filter_anndata_slots",
     "filter_adata_by_group_size",
-    "extract_top_bottom_genes",
-    "rank_genes_subsets",
-    "pull_out_genes",
-    "pull_out_genes_v2",
+#    "extract_top_bottom_genes",
+#    "pull_out_genes",
+#    "pull_out_genes_v2",
     "create_gene_structure_dict_by_stage",
     "filter_genes_dict",
     "write_gmt",

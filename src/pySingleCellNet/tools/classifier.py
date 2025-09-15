@@ -560,7 +560,7 @@ def train_classifier(aTrain,
             cell_types.append('rand')
             unique_colors = get_unique_colors(len(cell_types))
             cell_type_to_color = {cell_type: color for cell_type, color in zip(cell_types, unique_colors)}
-            cell_type_to_color['rand'] = SCN_CATEGORY_COLOR_DICT['Rand']
+            cell_type_to_color['rand'] = np.array(SCN_CATEGORY_COLOR_DICT['Rand'])
         bar() # Bar 5
 
         argList = {'nRand': nRand, 'nTopGenes': nTopGenes, 'nTopGenePairs': nTopGenePairs, 'nTrees': nTrees, 'propOther': propOther}

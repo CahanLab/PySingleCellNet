@@ -22,6 +22,172 @@ import marsilea as ml
 import marsilea.plotter as mp
 from sklearn.metrics import classification_report
 from matplotlib.colors import LinearSegmentedColormap
+import re
+
+def heatmap_clustering_eval(
+    df: pd.DataFrame,
+    index_col: str = "label_col",
+    metrics=("n_clusters", "unique_strict_genes", "unique_naive_genes", "frac_pairs_with_at_least_n_strict"),
+    bar_sum_cols=("unique_strict_genes", "unique_naive_genes"),
+    cmap_eval: str = "viridis",
+    scale_eval: str = "zscore",        # 'zscore' | 'minmax' | 'none' (per column)
+    linewidth: float = 0.5,
+    value_fmt: dict | None = None,     # e.g., {"frac_pairs_with_at_least_n_strict": "{:.2f}"}
+    title: str = "Clustering parameter sweep (select best rows)",
+    render: bool = True,
+    set_default_font: bool = True,     # avoids 'pc/k/res' being misread as font family
+):
+    """
+    Marsilea heatmap to guide clustering parameter selection.
+
+    Left:   textual columns for parsed parameters (pc, k, res)
+    Center: eval heatmap with raw numbers printed in cells (includes n_clusters as first column)
+    Right:  bar = unique_strict_genes + unique_naive_genes; rows sorted descending by this score
+
+    Row names (index strings) are NOT shown.
+    """
+
+    # Optional: force a sane default font to avoid font-family warnings
+    if set_default_font:
+        try:
+            import matplotlib as mpl
+            mpl.rcParams["font.family"] = "DejaVu Sans"
+        except Exception:
+            pass
+
+    # --- Normalize selections and validate columns
+    metrics      = list(metrics)
+    bar_sum_cols = list(bar_sum_cols)
+
+    need = {index_col, *metrics, *bar_sum_cols}
+    missing = need - set(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns: {sorted(missing)}; available={sorted(df.columns)}")
+
+    # --- Unique rows by index_col & keep needed cols
+    base = (
+        df[[index_col, *metrics]]
+        .drop_duplicates(subset=[index_col])
+        .set_index(index_col)
+        .copy()
+    )
+
+    # --- selection score = sum of chosen gene-count columns
+    score = (
+        df[[index_col, *bar_sum_cols]]
+        .drop_duplicates(subset=[index_col])
+        .set_index(index_col)
+        .sum(axis=1)
+    )
+
+    # --- order rows by descending score
+    order = score.sort_values(ascending=False).index
+    base  = base.loc[order]
+    score = score.loc[order]
+
+    # --- raw values to print in cells
+    X_raw = base.loc[:, metrics].astype(float)
+
+    if value_fmt is None:
+        value_fmt = {
+            col: "{:.3f}" if "frac" in col or "ratio" in col else "{:.0f}"
+            for col in metrics
+        }
+        if "n_clusters" in X_raw.columns:
+            value_fmt["n_clusters"] = "{:.0f}"
+
+    text_matrix = np.array(
+        [[value_fmt.get(c, "{:.3f}").format(v) for c, v in zip(X_raw.columns, row)]
+         for row in X_raw.values]
+    )
+
+    # --- color matrix for evals heatmap (column-wise scaling)
+    X_color = X_raw.copy()
+    if scale_eval == "zscore":
+        X_color = (X_color - X_color.mean(axis=0)) / X_color.std(axis=0).replace(0, np.nan)
+        X_color = X_color.fillna(0.0)
+    elif scale_eval == "minmax":
+        rng = (X_color.max(axis=0) - X_color.min(axis=0)).replace(0, np.nan)
+        X_color = (X_color - X_color.min(axis=0)) / rng
+        X_color = X_color.fillna(0.0)
+    elif scale_eval != "none":
+        raise ValueError("scale_eval must be one of {'zscore','minmax','none'}")
+
+    # --- parse pc / k / res from index_col strings like: "autoc_pc20_pct1.00_s01_k10_res0.05"
+    def _extract_num(pat, s, cast=float):
+        m = re.search(pat, s)
+        return cast(m.group(1)) if m else np.nan
+
+    labels_series = order.to_series()
+    params_df = pd.DataFrame({
+        "pc":  labels_series.map(lambda s: _extract_num(r"pc(\d+)", s, int)),
+        "k":   labels_series.map(lambda s: _extract_num(r"k(\d+)", s, int)),
+        "res": labels_series.map(lambda s: _extract_num(r"res([0-9]*\.?[0-9]+)", s, float)),
+    }, index=order)
+
+    # --- Marsilea plotting
+    import marsilea as ma
+    import marsilea.plotter as mp
+
+    # Evals heatmap (no row name labels)
+    h_eval = ma.Heatmap(
+        X_color.values,
+        linewidth=linewidth,
+        label="Evals",
+        cmap=cmap_eval,
+    )
+    h_eval.add_top(mp.Labels(list(X_color.columns)))      # show metric names, not row labels
+    h_eval.add_layer(mp.TextMesh(text_matrix))            # overlay raw numbers
+
+    # Right-side bar (with clear label & padding)
+    h_eval.add_right(
+        mp.Numbers(score.values, label="unique_strict + unique_naive"),
+        size=0.9,
+        pad=0.15,   # generous so the label is clear
+    )
+
+    # Title & legends
+    h_eval.add_legends()
+    h_eval.add_title(title)
+
+    # --- LEFT textual parameter columns: pc | k | res (aligned with rows)
+    # Use label + label_props so 'pc/k/res' are treated as titles, not font families.
+    pc_col = mp.Labels(
+        params_df["pc"].astype("Int64").astype(str).replace("<NA>", "NA"),
+        label="pc",
+        label_loc="top",
+        label_props={"family": "DejaVu Sans", "weight": "bold"},
+    )
+    k_col = mp.Labels(
+        params_df["k"].astype("Int64").astype(str).replace("<NA>", "NA"),
+        label="k",
+        label_loc="top",
+        label_props={"family": "DejaVu Sans", "weight": "bold"},
+    )
+    res_col = mp.Labels(
+        params_df["res"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "NA"),
+        label="res",
+        label_loc="top",
+        label_props={"family": "DejaVu Sans", "weight": "bold"},
+    )
+
+    # Attach the three text columns on the left (sizes tuned for readability)
+    h_eval.add_left(pc_col,  size=0.7, pad=0.05)
+    h_eval.add_left(k_col,   size=0.7, pad=0.05)
+    h_eval.add_left(res_col, size=0.9, pad=0.10)
+
+    if render:
+        h_eval.render()
+
+    return {
+        "canvas": h_eval,
+        "row_order": order.to_list(),
+        "score": score,
+        "params": params_df,
+    }
+
+
+
 
 
 def heatmap_classifier_report(df: pd.DataFrame,

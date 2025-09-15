@@ -63,6 +63,8 @@ nav:
   - Tutorials: 
     - 'Quickstart': notebooks/quickstart.ipynb
     - 'Explore': notebooks/categorize.ipynb
+    - 'Clustering cells': notebooks/cluster_alot.ipynb
+#    - 'Clustering genes': notebooks/gene_modules.ipynb
 #    - 'train & classify': 'notebooks/Basics.ipynb'
 #    - 'analyze _in vitro_ cells': 'notebooks/explore.ipynb'
 #    - 'prepare training data': 'notebooks/how-to_prepare_reference_data.ipynb'
@@ -71,9 +73,9 @@ nav:
   - Training data: training_data.md
   - References: refs.md
   - API:
-    - 'Utilities': 'utils.md'
-    - 'Classifier': 'classifier.md'
-    - 'Plotting': 'plotting.md'
+    - 'Utilities': utils.md
+    - 'Tools': tools.md
+    - 'Plotting': plotting.md
   - Release Notes: CHANGELOG.md
 
 

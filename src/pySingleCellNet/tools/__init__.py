@@ -35,10 +35,9 @@ from .gene import (
     build_gene_knn,
     find_gene_modules,
     whoare_genes_neighbors,
-    score_gene_modules,
     what_module_has_gene,
+    score_gene_sets
 )
-
 
 # API
 __all__ = [
@@ -60,7 +59,7 @@ __all__ = [
     "build_gene_knn",
     "find_gene_modules",
     "whoare_genes_neighbors",
-    "score_gene_modules",
     "what_module_has_gene",
+    "score_gene_sets"
 ]
 
