@@ -4,6 +4,14 @@ All notable changes to PySingleCellNet should be listed here. The definition of 
 
 ## [Unreleased]
 
+### Changed
+- tl.cluster_subclusters layer should be None instead of counts 
+
+### Fixed
+
+- tl.cluster_subclusters calls sc.pp.pca with mask_var instead of use_highly_variable
+
+
 ## [0.1.3] - 2025-09-15
 
 ### Changed

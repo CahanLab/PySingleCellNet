@@ -259,7 +259,7 @@ def cluster_subclusters(
     adata: ad.AnnData,
     cluster_column: str = 'leiden',
     to_subcluster: list[str] = None,
-    layer: str = 'counts',
+    layer = None,
     n_hvg: int = 2000,
     hvg_flavor: str  = 'cell_ranger',
     n_pcs: int = 40,
@@ -281,8 +281,8 @@ def cluster_subclusters(
             Name of the `.obs` column holding the original cluster assignments. Default is 'leiden'.
         to_subcluster: list of str, optional
             List of cluster labels (as strings) to subcluster. If `None`, subclusters *all* clusters.
-        layer: str, optional
-            Layer name in `adata.layers` to use for HVG detection. Default is 'counts'.
+        layer: 
+            Layer name in `adata.layers` to use for HVG detection. Default is None (and so uses .X)
         n_hvg: int, optional
             Number of highly variable genes to select per cluster. Default is 2000.
         n_pcs: int, optional
@@ -335,7 +335,7 @@ def cluster_subclusters(
         )
 
         # 2) PCA
-        sc.pp.pca(sub, n_comps=n_pcs, use_highly_variable=True)
+        sc.pp.pca(sub, n_comps=n_pcs, mask_var='highly_variable')
 
         # 3) kNN
         sc.pp.neighbors(sub, n_neighbors=n_neighbors, use_rep='X_pca')
