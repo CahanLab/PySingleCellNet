@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import anndata as ad
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 import re
 from scipy.sparse import issparse, coo_matrix, csr_matrix, hstack
 import igraph as ig
@@ -121,7 +121,7 @@ def split_adata_indices(
 
 
 def rename_cluster_labels(
-    adata: ad,AnnData,
+    adata: ad.AnnData,
     old_col: str = "cluster",
     new_col: str = "short_cluster"
 ) -> None:
@@ -198,6 +198,92 @@ def limit_anndata_to_common_genes(anndata_list):
 def remove_genes(adata, genes_to_exclude=None):
     adnew = adata[:,~adata.var_names.isin(genes_to_exclude)].copy()
     return adnew
+
+
+def drop_pcs_from_embedding(
+    adata: ad.AnnData,
+    pc_indices: Sequence[int],
+    *,
+    base_obsm_key: str = "X_pca",
+    pca_uns_key: str = "pca",
+    base_varm_key: str = "PCs",
+    new_suffix: Optional[str] = None,
+    assume_one_indexed: bool = True,
+) -> Dict[str, str]:
+    """Create PCA-derived slots that exclude specific principal components.
+
+    Parameters
+    ----------
+    adata
+        AnnData containing PCA results (``.obsm[base_obsm_key]``).
+    pc_indices
+        Iterable of PC identifiers to drop. By default interpreted as 1-indexed
+        (PC1 == 1); set ``assume_one_indexed=False`` for zero-based indices.
+    base_obsm_key
+        Name of the PCA embedding in ``adata.obsm`` (default ``"X_pca"``).
+    pca_uns_key
+        ``adata.uns`` entry that stores PCA metadata (default ``"pca"``).
+    base_varm_key
+        ``adata.varm`` key with per-gene loadings (default ``"PCs"``).
+    new_suffix
+        Optional suffix used when naming the derived slots. If omitted, a suffix
+        like ``"noPC1_2"`` is generated from the requested indices.
+    assume_one_indexed
+        Whether ``pc_indices`` are 1-indexed (default ``True``). If ``False``,
+        indices are treated as zero-based column positions.
+
+    Returns
+    -------
+    dict
+        Mapping describing the new keys that were created:
+        ``{"obsm": new_obsm_key, "varm": new_varm_key, "variance_ratio": new_var_ratio_key}``.
+    """
+
+    if base_obsm_key not in adata.obsm:
+        raise ValueError(f"'{base_obsm_key}' not found in adata.obsm; run PCA first.")
+    if not pc_indices:
+        raise ValueError("pc_indices must contain at least one component to drop.")
+
+    base_embed = adata.obsm[base_obsm_key]
+    n_cells, n_pcs = base_embed.shape
+
+    idx = np.array(pc_indices, dtype=int)
+    if assume_one_indexed:
+        idx = idx - 1
+    if (idx < 0).any():
+        raise ValueError("pc_indices must be positive when assume_one_indexed=True.")
+    if (idx >= n_pcs).any():
+        raise ValueError("pc_indices contain entries >= total number of PCs available.")
+    idx = np.unique(idx)
+    keep = np.setdiff1d(np.arange(n_pcs), idx, assume_unique=False)
+    if keep.size == 0:
+        raise ValueError("Removing all PCs is not allowed.")
+
+    suffix = new_suffix
+    if suffix is None:
+        pcs_str = "_".join([str(int(i + (1 if assume_one_indexed else 0))) for i in idx])
+        suffix = f"noPC{pcs_str}"
+
+    new_obsm_key = f"{base_obsm_key}_{suffix}"
+    adata.obsm[new_obsm_key] = base_embed[:, keep]
+
+    var_ratio_key = None
+    if pca_uns_key in adata.uns:
+        uns_entry = adata.uns[pca_uns_key]
+        if isinstance(uns_entry, dict) and "variance_ratio" in uns_entry:
+            var_ratio_key = f"variance_ratio_{suffix}"
+            adata.uns[pca_uns_key][var_ratio_key] = np.asarray(uns_entry["variance_ratio"])[keep]
+
+    varm_key = None
+    if base_varm_key in adata.varm:
+        varm_key = f"{base_varm_key}_{suffix}"
+        adata.varm[varm_key] = np.asarray(adata.varm[base_varm_key])[:, keep]
+
+    return {
+        "obsm": new_obsm_key,
+        "varm": varm_key,
+        "variance_ratio": var_ratio_key,
+    }
 
 
 def filter_anndata_slots(
@@ -390,7 +476,6 @@ def filter_adata_by_group_size(adata: ad.AnnData, groupby: str, ncells: int = 20
     print(f"Filtered AnnData object contains {filtered_adata.n_obs} cells from {filtered_adata.obs[groupby].nunique()} groups.")
     
     return filtered_adata
-
 
 
 

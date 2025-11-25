@@ -886,4 +886,154 @@ def what_module_has_gene(
     return [key for key, genes in genemodules.items() if target_gene in genes]
 
 
+def correlate_module_scores_with_pcs(
+    adata: AnnData,
+    score_key: Union[str, Sequence[float], np.ndarray, pd.Series],
+    *,
+    pca_key: str = "X_pca",
+    variance_key: Optional[str] = "pca",
+    method: str = "pearson",
+    min_abs_corr: Optional[float] = 0.3,
+    drop_na: bool = True,
+    sort: bool = True,
+) -> pd.DataFrame:
+    """Quantify the association between a module score and individual PCs.
+
+    Parameters
+    ----------
+    adata
+        AnnData object containing PCs in ``adata.obsm`` and per-cell module scores.
+    score_key
+        Either the name of an ``adata.obs`` column holding module scores (e.g., the
+        output of :func:`score_gene_sets`) or an explicit array-like of shape
+        ``(n_cells,)``.
+    pca_key
+        Key of the embedding in ``adata.obsm`` to correlate against (defaults to
+        ``"X_pca"``).
+    variance_key
+        Optional ``adata.uns`` key that stores ``"variance_ratio"`` for the chosen
+        PCA run (defaults to ``"pca"`` when using ``sc.tl.pca``).
+    method
+        Correlation metric: ``"pearson"`` (default) or ``"spearman"``.
+    min_abs_corr
+        Absolute-correlation threshold used to flag PCs that strongly follow the
+        module score. Set to ``None`` to skip flagging.
+    drop_na
+        If ``True`` (default), silently drop cells with missing scores/PC values.
+        Otherwise raise when NaNs are detected.
+    sort
+        If ``True`` (default), sort the output by descending absolute correlation.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Table with one row per PC containing the correlation, absolute correlation,
+        two-sided p-value, variance ratio (when available), and a boolean flag
+        indicating whether the PC exceeds ``min_abs_corr``.
+    """
+
+    if pca_key not in adata.obsm:
+        raise ValueError(f"'{pca_key}' not found in adata.obsm. Run PCA first.")
+    pcs = np.asarray(adata.obsm[pca_key], dtype=np.float64)
+    if pcs.ndim != 2:
+        raise ValueError(f"adata.obsm['{pca_key}'] must be 2-D (cells × PCs).")
+    if pcs.shape[0] != adata.n_obs:
+        raise ValueError("Number of rows in the PCA embedding does not match n_obs.")
+
+    # Resolve the module scores vector
+    score_label = None
+    if isinstance(score_key, str):
+        if score_key not in adata.obs:
+            raise ValueError(f"score_key='{score_key}' not present in adata.obs.")
+        scores = adata.obs[score_key].to_numpy(dtype=np.float64)
+        score_label = score_key
+    else:
+        scores = np.asarray(score_key, dtype=np.float64).reshape(-1)
+        if scores.shape[0] != adata.n_obs:
+            raise ValueError("score_key array must have length equal to adata.n_obs.")
+
+    # Handle missing data
+    finite_scores = np.isfinite(scores)
+    finite_pcs = np.all(np.isfinite(pcs), axis=1)
+    if drop_na:
+        mask = finite_scores & finite_pcs
+    else:
+        if not (finite_scores.all() and finite_pcs.all()):
+            raise ValueError("NaN/inf detected in scores or PCs; set drop_na=True to filter them.")
+        mask = np.ones_like(finite_scores, dtype=bool)
+
+    n_valid = int(mask.sum())
+    if n_valid < 3:
+        raise ValueError("Need at least 3 valid cells to compute correlations.")
+
+    y = scores[mask]
+    X = pcs[mask]
+
+    method_lc = method.lower()
+    if method_lc not in {"pearson", "spearman"}:
+        raise ValueError("method must be either 'pearson' or 'spearman'.")
+
+    if method_lc == "spearman":
+        from scipy.stats import rankdata  # local import to avoid global dependency
+        y = rankdata(y)
+        # Rank each PC separately
+        X = np.apply_along_axis(rankdata, 0, X)
+
+    # Center data
+    y = y.astype(np.float64)
+    y_centered = y - y.mean()
+    y_norm = np.sqrt(np.sum(y_centered ** 2))
+    if y_norm == 0:
+        raise ValueError("Module score has zero variance; correlation undefined.")
+
+    X_centered = X - X.mean(axis=0)
+    X_norm = np.sqrt(np.sum(X_centered ** 2, axis=0))
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        corr = (y_centered @ X_centered) / (y_norm * X_norm)
+    corr = corr.astype(np.float64)
+
+    n_pcs = corr.size
+    dof = n_valid - 2
+    if dof < 1:
+        raise ValueError("Not enough cells to compute correlation p-values (need >= 3).")
+
+    # Compute two-sided Pearson p-values (valid for Spearman ranks as an approximation)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        denom = np.clip(1.0 - corr**2, 1e-12, None)
+        t_stat = corr * np.sqrt(dof / denom)
+    from scipy import stats as _stats  # local import
+    p_values = 2.0 * _stats.t.sf(np.abs(t_stat), df=dof)
+
+    # Variance ratios (if available)
+    var_ratio = np.full(n_pcs, np.nan)
+    if variance_key is not None and variance_key in adata.uns:
+        uns_entry = adata.uns[variance_key]
+        if isinstance(uns_entry, Mapping) and "variance_ratio" in uns_entry:
+            vr = np.asarray(uns_entry["variance_ratio"], dtype=np.float64).ravel()
+            if vr.size:
+                var_ratio[: min(n_pcs, vr.size)] = vr[:n_pcs]
+
+    result = pd.DataFrame({
+        "pc": [f"PC{i}" for i in range(1, n_pcs + 1)],
+        "pc_index": np.arange(1, n_pcs + 1, dtype=int),
+        "correlation": corr,
+        "abs_correlation": np.abs(corr),
+        "p_value": p_values,
+        "variance_ratio": var_ratio,
+        "n_cells": n_valid,
+        "score_key": score_label or "array",
+    })
+
+    if min_abs_corr is not None:
+        threshold = float(min_abs_corr)
+        result["flag_high_corr"] = result["abs_correlation"] >= threshold
+        result.attrs["min_abs_corr"] = threshold
+    else:
+        result["flag_high_corr"] = False
+
+    if sort:
+        result = result.sort_values("abs_correlation", ascending=False).reset_index(drop=True)
+
+    return result
 

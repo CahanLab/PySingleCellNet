@@ -11,7 +11,8 @@ from .adataTools import (
     limit_anndata_to_common_genes,
     remove_genes,
     filter_anndata_slots,
-    filter_adata_by_group_size
+    filter_adata_by_group_size,
+    drop_pcs_from_embedding
 )
 
 #from .gene import (
@@ -56,6 +57,7 @@ __all__ = [
     "remove_genes",
     "filter_anndata_slots",
     "filter_adata_by_group_size",
+    "drop_pcs_from_embedding",
 #    "extract_top_bottom_genes",
 #    "pull_out_genes",
 #    "pull_out_genes_v2",

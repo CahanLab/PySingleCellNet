@@ -28,12 +28,14 @@ def cluster_alot(
 
     Assumptions:
         * ``adata.X`` is **already log-transformed**.
-        * PCA has been computed and ``adata.obsm['X_pca']`` is present; this is
-          used as the base embedding for PC selection/subsampling.
+        * A base embedding is stored in ``adata.obsm``. By default this is
+          ``adata.obsm['X_pca']``, but you can override it via
+          ``knn_params['use_rep']`` to leverage an alternative representation.
 
     Args:
         adata: AnnData object containing the log-transformed expression matrix.
-            Must include ``obsm['X_pca']`` (shape ``(n_cells, n_pcs_total)``).
+            Must include the embedding referenced by ``knn_params['use_rep']``
+            (defaults to ``obsm['X_pca']``).
         leiden_resolutions: Leiden resolution values to evaluate (passed to
             ``sc.tl.leiden``). Each resolution is combined with every KNN/PC
             configuration in the sweep.
@@ -56,6 +58,9 @@ def cluster_alot(
         knn_params: KNN graph parameters. Supported keys:
             * ``"n_neighbors"`` (List[int], default ``[10]``): Candidate values
               for ``K`` used in ``sc.pp.neighbors``.
+            * ``"use_rep"`` (str, default ``"X_pca"``): Name of the
+              ``adata.obsm`` representation to use as the base embedding (e.g.,
+              ``"X_pca_noPC1"``). PC subsampling operates on this matrix.
         random_state: Random seed for PC subset sampling (when
             ``percent_of_pcs`` is used). Pass ``None`` for non-deterministic
             sampling. Defaults to ``None``.
@@ -70,6 +75,7 @@ def cluster_alot(
         * **runs** (``pd.DataFrame``): One row per clustering run with metadata columns such as:
           - ``obs_key``: Name of the column in ``adata.obs`` that stores cluster labels.
           - ``neighbors_key``: Name of the neighbors graph key used/created.
+          - ``use_rep``: Embedding key that served as the base representation.
           - ``resolution``: Leiden resolution value used for the run.
           - ``top_n_pcs``: Number of leading PCs considered.
           - ``pct_pcs``: Fraction of PCs used when subsampling (``percent_of_pcs``), or ``1.0`` if all were used.
@@ -80,10 +86,10 @@ def cluster_alot(
             (``round(pct_pcs * top_n_pcs)`` or ``top_n_pcs`` if no subsampling).
 
     Raises:
-        KeyError: If ``'X_pca'`` is missing from ``adata.obsm``.
-        ValueError: If any provided parameter is out of range (e.g.,
-            ``percent_of_pcs`` not in ``(0, 1]``; empty lists; non-positive
-            ``n_neighbors``).
+        ValueError: If the requested ``knn_params['use_rep']`` embedding is
+            missing from ``adata.obsm`` or if any provided parameter is out of
+            range (e.g., ``percent_of_pcs`` not in ``(0, 1]``; empty lists;
+            non-positive ``n_neighbors``).
         RuntimeError: If neighbor graph construction or Leiden clustering fails.
 
     Notes:
@@ -108,17 +114,27 @@ def cluster_alot(
         >>> runs[["obs_key", "n_clusters"]].head()
     """
 
-    # ---- Validate prerequisites ----
-    if "X_pca" not in adata.obsm:
-        raise ValueError("`adata.obsm['X_pca']` not found. Please run PCA first.")
-    Xpca = adata.obsm["X_pca"]
-    n_pcs_available = Xpca.shape[1]
-    if n_pcs_available < 2:
-        raise ValueError(f"Not enough PCs ({n_pcs_available}) in `X_pca`.")
-
     # ---- Normalize params ----
     pca_params = dict(pca_params or {})
     knn_params = dict(knn_params or {})
+
+    use_rep_key = knn_params.get("use_rep", "X_pca")
+    if use_rep_key is None:
+        use_rep_key = "X_pca"
+    if not isinstance(use_rep_key, str):
+        raise ValueError("`knn_params['use_rep']` must be a string key in `adata.obsm`.")
+
+    # ---- Validate prerequisites ----
+    if use_rep_key not in adata.obsm:
+        raise ValueError(
+            f"`adata.obsm['{use_rep_key}']` not found. Please compute that representation first."
+        )
+    X_rep = adata.obsm[use_rep_key]
+    n_pcs_available = X_rep.shape[1]
+    if n_pcs_available < 2:
+        raise ValueError(
+            f"Not enough components ({n_pcs_available}) in `adata.obsm['{use_rep_key}']`."
+        )
     top_n_pcs: List[int] = pca_params.get("top_n_pcs", [40])
     percent_of_pcs: Optional[float] = pca_params.get("percent_of_pcs", None)
     n_random_samples: Optional[int] = pca_params.get("n_random_samples", None)
@@ -143,9 +159,9 @@ def cluster_alot(
     # ---- Helper: build neighbors from a given PC subspace ----
     def _neighbors_from_pc_indices(pc_idx: np.ndarray, n_neighbors: int, neighbors_key: str):
         """Create a neighbors graph using the given PC column indices."""
-        # Create a temporary representation name
-        temp_rep_key = f"X_pca_sub_{neighbors_key}"
-        adata.obsm[temp_rep_key] = Xpca[:, pc_idx]
+        # Create a temporary representation name derived from the requested embedding
+        temp_rep_key = f"{use_rep_key}_sub_{neighbors_key}"
+        adata.obsm[temp_rep_key] = X_rep[:, pc_idx]
 
         # Build neighbors; store under unique keys (in uns & obsp)
         sc.pp.neighbors(
@@ -158,6 +174,7 @@ def cluster_alot(
         # Record which PCs were used (for provenance)
         if neighbors_key in adata.uns:
             adata.uns[neighbors_key]["pcs_indices"] = pc_idx.astype(int)
+            adata.uns[neighbors_key]["base_representation"] = use_rep_key
 
         # Clean up the temporary representation to save memory
         del adata.obsm[temp_rep_key]
@@ -203,6 +220,7 @@ def cluster_alot(
                 rows.append({
                     "obs_key": obs_key,
                     "neighbors_key": neighbors_key,
+                    "use_rep": use_rep_key,
                     "resolution": res,
                     "top_n_pcs": N,
                     "pct_pcs": float(pct_str),
@@ -236,6 +254,7 @@ def cluster_alot(
             rows.append({
                 "obs_key": obs_key,
                 "neighbors_key": neighbors_key,
+                "use_rep": use_rep_key,
                 "resolution": float(res),
                 "top_n_pcs": int(N),
                 "pct_pcs": float(pct_str),
@@ -248,8 +267,19 @@ def cluster_alot(
 
     summary_df = pd.DataFrame(rows)
     # nice ordering
-    cols = ["obs_key","neighbors_key","resolution","top_n_pcs","pct_pcs","sample_idx",
-            "n_neighbors","pcs_used_count","n_clusters","status"]
+    cols = [
+        "obs_key",
+        "neighbors_key",
+        "use_rep",
+        "resolution",
+        "top_n_pcs",
+        "pct_pcs",
+        "sample_idx",
+        "n_neighbors",
+        "pcs_used_count",
+        "n_clusters",
+        "status",
+    ]
     summary_df = summary_df[cols]
 
     return summary_df
@@ -352,6 +382,3 @@ def cluster_subclusters(
         # Prefix subcluster labels and write back
         new_labels = orig + "_" + sub.obs['leiden_sub'].astype(str)
         adata.obs.loc[mask, subcluster_col_name] = new_labels.values
-
-
-

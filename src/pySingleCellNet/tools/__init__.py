@@ -36,7 +36,8 @@ from .gene import (
     find_gene_modules,
     whoare_genes_neighbors,
     what_module_has_gene,
-    score_gene_sets
+    score_gene_sets,
+    correlate_module_scores_with_pcs
 )
 
 # API
@@ -60,6 +61,7 @@ __all__ = [
     "find_gene_modules",
     "whoare_genes_neighbors",
     "what_module_has_gene",
-    "score_gene_sets"
+    "score_gene_sets",
+    "correlate_module_scores_with_pcs"
 ]
 
