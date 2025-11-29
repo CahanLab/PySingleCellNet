@@ -34,6 +34,7 @@ from .comparison import (
 from .gene import (
     build_gene_knn,
     find_gene_modules,
+    name_gene_modules_by_annotation,
     whoare_genes_neighbors,
     what_module_has_gene,
     score_gene_sets,
@@ -59,6 +60,7 @@ __all__ = [
     "deg",
     "build_gene_knn",
     "find_gene_modules",
+    "name_gene_modules_by_annotation",
     "whoare_genes_neighbors",
     "what_module_has_gene",
     "score_gene_sets",

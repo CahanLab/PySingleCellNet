@@ -1,5 +1,8 @@
 from __future__ import annotations
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union, Callable
+from collections import defaultdict
+from functools import lru_cache
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -276,6 +279,257 @@ def find_gene_modules(
     }
 
     return modules
+
+
+def _species_to_taxon_id(species: str) -> str:
+    """Normalize species name to NCBI taxon ID string used by STRING files."""
+    species_norm = str(species).strip().lower().replace(" ", "_")
+    lut = {
+        "mouse": "10090",
+        "mus_musculus": "10090",
+        "m_musculus": "10090",
+        "human": "9606",
+        "homo_sapiens": "9606",
+    }
+    if species_norm in lut:
+        return lut[species_norm]
+    if species_norm.isdigit():
+        return species_norm
+    raise ValueError(f"Unsupported species '{species}'. Provide an NCBI taxon ID or one of {sorted(lut)}.")
+
+
+def _default_string_data_dir() -> Path:
+    """Resolve the default STRING data directory packaged with the repository."""
+    return Path(__file__).resolve().parents[3] / "data" / "STRING"
+
+
+def _clean_term_label(term: str, max_len: int = 70) -> str:
+    """Tidy annotation text and keep it concise."""
+    label = " ".join(str(term).split()).rstrip(".;")
+    if len(label) > max_len:
+        label = label[: max_len - 3].rstrip() + "..."
+    return label
+
+
+def _score_terms_for_module(
+    module_genes: Sequence[str],
+    gene_to_terms: Mapping[str, Sequence[Tuple[str, Optional[int]]]],
+    min_genes_for_term: int,
+    max_cluster_size: Optional[int],
+    banned_terms: Mapping[str, None],
+) -> List[Tuple[str, float, int, Optional[int]]]:
+    """
+    Score annotation terms by coverage and specificity for a given module.
+
+    Returns a list of tuples (term, score, support, cluster_size) sorted by descending score.
+    """
+    module_genes_unique = list(dict.fromkeys(str(g) for g in module_genes))
+    module_size = len(module_genes_unique)
+    if module_size == 0:
+        return []
+
+    term_to_genes = defaultdict(set)
+    term_to_cluster_size: Dict[str, Optional[int]] = {}
+
+    for g in module_genes_unique:
+        for term, csize in gene_to_terms.get(g, []):
+            term_to_genes[term].add(g)
+            if csize is not None:
+                prev = term_to_cluster_size.get(term)
+                if prev is None or csize < prev:
+                    term_to_cluster_size[term] = int(csize)
+
+    scored: List[Tuple[str, float, int, Optional[int]]] = []
+    for term, genes in term_to_genes.items():
+        term_l = term.lower()
+        if term_l in banned_terms:
+            continue
+        support = len(genes)
+        if support < min_genes_for_term:
+            continue
+        cluster_size = term_to_cluster_size.get(term)
+        if max_cluster_size is not None and cluster_size is not None and cluster_size > max_cluster_size:
+            continue
+        specificity = 1.0
+        if cluster_size is not None and cluster_size > 0:
+            specificity = 1.0 / float(np.log1p(cluster_size))
+        coverage = support / float(module_size)
+        score = coverage * specificity
+        scored.append((term, score, support, cluster_size))
+
+    scored.sort(key=lambda x: (-x[1], -x[2], x[3] if x[3] is not None else float("inf"), x[0]))
+    return scored
+
+
+@lru_cache(maxsize=8)
+def _load_string_gene_annotations(species: str, data_dir: Optional[str]) -> Dict[str, List[Tuple[str, Optional[int]]]]:
+    """
+    Load STRING cluster descriptions and build a gene -> [(term, cluster_size)] mapping.
+    """
+    taxon_id = _species_to_taxon_id(species)
+    base_dir = Path(data_dir) if data_dir is not None else _default_string_data_dir()
+    cluster_info_path = base_dir / f"{taxon_id}.clusters.info.v12.0.txt"
+    cluster_proteins_path = base_dir / f"{taxon_id}.clusters.proteins.v12.0.txt"
+    protein_info_path = base_dir / f"{taxon_id}.protein.info.v12.0.txt"
+
+    for pth in (cluster_info_path, cluster_proteins_path, protein_info_path):
+        if not pth.exists():
+            raise FileNotFoundError(
+                f"Expected STRING file not found: {pth}. Provide a valid `string_data_dir` pointing to STRING exports."
+            )
+
+    cluster_info = pd.read_csv(cluster_info_path, sep="\t")
+    cluster_info = cluster_info[["cluster_id", "cluster_size", "best_described_by"]]
+
+    cluster_members = pd.read_csv(cluster_proteins_path, sep="\t")
+    protein_info = pd.read_csv(protein_info_path, sep="\t")[["#string_protein_id", "preferred_name"]]
+
+    annotated = (
+        cluster_members.merge(protein_info, left_on="protein_id", right_on="#string_protein_id", how="left")
+        .merge(cluster_info, on="cluster_id", how="left")
+    )
+
+    gene_to_terms: Dict[str, List[Tuple[str, Optional[int]]]] = defaultdict(list)
+    for row in annotated.itertuples():
+        gene = getattr(row, "preferred_name", None)
+        term = getattr(row, "best_described_by", None)
+        cluster_size = getattr(row, "cluster_size", None)
+        if pd.isna(gene) or pd.isna(term):
+            continue
+        term_clean = str(term).strip()
+        if not term_clean:
+            continue
+        cluster_size_int = None
+        if pd.notna(cluster_size):
+            try:
+                cluster_size_int = int(cluster_size)
+            except (TypeError, ValueError):
+                cluster_size_int = None
+        gene_to_terms[str(gene)].append((term_clean, cluster_size_int))
+
+    deduped: Dict[str, List[Tuple[str, Optional[int]]]] = {}
+    for gene, entries in gene_to_terms.items():
+        seen = set()
+        unique_entries: List[Tuple[str, Optional[int]]] = []
+        for term, size in entries:
+            key = (term, size)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_entries.append((term, size))
+        deduped[gene] = unique_entries
+
+    return deduped
+
+
+def name_gene_modules_by_annotation(
+    modules: Mapping[str, Sequence[str]],
+    annotation_source: str,
+    *,
+    species: str = "mouse",
+    string_data_dir: Optional[Union[str, Path]] = None,
+    min_genes_for_term: int = 2,
+    top_n_terms: int = 1,
+    include_source_in_name: bool = True,
+    fallback_to_original: bool = True,
+    max_cluster_size: Optional[int] = 5000,
+    banned_terms: Optional[Sequence[str]] = None,
+) -> Dict[str, List[str]]:
+    """
+    Rename gene modules using shared functional annotations.
+
+    Parameters
+    ----------
+    modules
+        Mapping from module name to a sequence of gene symbols.
+    annotation_source
+        One of {"string", "go", "reactome", "interpro"}.
+        Currently, only "string" is supported with local STRING export files.
+    species
+        Species name or NCBI taxon ID. Defaults to "mouse" (10090).
+    string_data_dir
+        Directory containing STRING export files (e.g., data/STRING). If None, uses the
+        repository's default data/STRING location.
+    min_genes_for_term
+        Minimum number of module genes that must share a term to use it for naming.
+    top_n_terms
+        How many top terms to combine into the module label (joined with " | ").
+    include_source_in_name
+        If True, append the source tag (e.g., "(STRING)") to the label.
+    fallback_to_original
+        If True and no annotation is found, keep the original module name; otherwise use
+        a generic "module_{i}" placeholder.
+    max_cluster_size
+        Optional upper bound on STRING cluster size to consider (filters very broad/generic
+        terms such as "Cellular_component"). Set to None to disable.
+    banned_terms
+        Optional list of term strings (case-insensitive exact match) to exclude from naming.
+
+    Returns
+    -------
+    Dict[str, List[str]]
+        New mapping where keys are descriptive module names and values are the original gene lists.
+
+    Notes
+    -----
+    • The scoring favors terms that cover more module genes and come from smaller (more specific)
+      STRING clusters via a coverage × specificity heuristic.
+    • Extendability: hooks for GO/Reactome/InterPro can reuse the scoring helper by supplying
+      a gene -> [(term, specificity_size)] mapping.
+
+    Example
+    -------
+    >>> modules = {"gmod_0": ["Med14", "Med15", "Med16"]}
+    >>> name_gene_modules_by_annotation(modules, "string", species="mouse", string_data_dir="data/STRING")
+    {'Core mediator complex (STRING)': ['Med14', 'Med15', 'Med16']}
+    """
+    if not modules:
+        raise ValueError("`modules` is empty.")
+    if min_genes_for_term < 1:
+        raise ValueError("`min_genes_for_term` must be >= 1.")
+    if top_n_terms < 1:
+        raise ValueError("`top_n_terms` must be >= 1.")
+
+    source_norm = annotation_source.strip().lower()
+    if source_norm == "string":
+        gene_to_terms = _load_string_gene_annotations(species, None if string_data_dir is None else str(string_data_dir))
+        source_tag = "STRING"
+    elif source_norm in {"go", "reactome", "interpro"}:
+        raise NotImplementedError(f"Annotation source '{annotation_source}' is not yet implemented in this build.")
+    else:
+        raise ValueError(f"Unknown annotation_source '{annotation_source}'.")
+
+    banned = {t.lower() for t in (banned_terms or ["cellular_component", "biological_process", "molecular_function"])}
+
+    renamed: Dict[str, List[str]] = {}
+    used_names = set()
+    for idx, (orig_name, gene_list) in enumerate(modules.items()):
+        genes_unique = list(dict.fromkeys(str(g) for g in gene_list))
+        scored_terms = _score_terms_for_module(
+            genes_unique,
+            gene_to_terms,
+            min_genes_for_term,
+            max_cluster_size,
+            banned,
+        )
+
+        if not scored_terms:
+            base_name = orig_name if fallback_to_original else f"module_{idx+1}"
+        else:
+            selected = [_clean_term_label(term) for term, _, _, _ in scored_terms[:top_n_terms]]
+            base_name = " | ".join(selected)
+            if include_source_in_name:
+                base_name = f"{base_name} ({source_tag})"
+
+        candidate = base_name
+        suffix = 2
+        while candidate in used_names:
+            candidate = f"{base_name} #{suffix}"
+            suffix += 1
+        used_names.add(candidate)
+        renamed[candidate] = genes_unique
+
+    return renamed
 
 
 def whoare_genes_neighbors(
@@ -1036,4 +1290,3 @@ def correlate_module_scores_with_pcs(
         result = result.sort_values("abs_correlation", ascending=False).reset_index(drop=True)
 
     return result
-
