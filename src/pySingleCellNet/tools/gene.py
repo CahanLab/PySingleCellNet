@@ -532,6 +532,201 @@ def name_gene_modules_by_annotation(
     return renamed
 
 
+# ---------------------------------------------------------------------------
+# STRING physical-interaction modules
+# ---------------------------------------------------------------------------
+
+def _string_link_candidates(base_dir: Path, taxon_id: str):
+    """Yield candidate STRING link files in preference order."""
+    names = [
+        "protein.physical.links.full",
+        "protein.links.detailed",
+        "protein.links.full",
+        "protein.links",
+    ]
+    for stem in names:
+        p = base_dir / f"{taxon_id}.{stem}.v12.0.txt"
+        if p.exists():
+            yield p
+        p_gz = p.with_suffix(p.suffix + ".gz")
+        if p_gz.exists():
+            yield p_gz
+
+
+def _load_string_gene_id_map(species: str, data_dir: Optional[str]) -> pd.DataFrame:
+    """Load STRING protein info and return dataframe with gene->protein mapping."""
+    taxon_id = _species_to_taxon_id(species)
+    base_dir = Path(data_dir) if data_dir is not None else _default_string_data_dir()
+    protein_info_path = base_dir / f"{taxon_id}.protein.info.v12.0.txt"
+    if not protein_info_path.exists():
+        raise FileNotFoundError(
+            f"Expected STRING protein info file not found: {protein_info_path}. "
+            "Provide `string_data_dir` pointing to STRING exports."
+        )
+    df = pd.read_csv(protein_info_path, sep="\t", usecols=["#string_protein_id", "preferred_name"])
+    df = df.dropna(subset=["#string_protein_id", "preferred_name"])
+    return df
+
+
+def find_string_physical_modules(
+    genes: Sequence[str],
+    *,
+    species: str = "mouse",
+    string_data_dir: Optional[Union[str, Path]] = None,
+    min_confidence: int = 700,
+    evidence_channels: Optional[Sequence[str]] = None,
+    clustering: str = "leiden",
+    resolution: float = 1.0,
+    return_graph: bool = False,
+) -> Union[Dict[str, List[str]], Tuple[Dict[str, List[str]], ig.Graph]]:
+    """Cluster a user-supplied gene list into STRING physical-interaction modules.
+
+    Parameters
+    ----------
+    genes
+        Iterable of gene symbols (STRING preferred names).
+    species
+        Species name or NCBI taxon ID (default "mouse" -> 10090).
+    string_data_dir
+        Directory containing STRING export files. If None, uses packaged ``data/STRING``.
+    min_confidence
+        Minimum STRING combined score (0–1000) to keep an interaction. Default 700 (high confidence).
+    evidence_channels
+        Iterable of STRING evidence column names that must be >0 for an edge to be kept
+        (e.g., ["experimental", "database"]). If None/empty, no channel requirement.
+    clustering
+        "leiden" (via igraph) or "components" (connected components only).
+    resolution
+        Leiden resolution parameter (ignored if clustering="components").
+    return_graph
+        If True, also return the igraph graph used for clustering.
+
+    Returns
+    -------
+    modules : Dict[str, List[str]]
+        Mapping module name -> ordered list of gene symbols.
+    graph (optional)
+        igraph.Graph used for clustering.
+
+    Notes
+    -----
+    • Uses only local STRING flat files; no API calls required.
+    • Falls back to connected components if Leiden is unavailable or the graph is tiny.
+    """
+
+    gene_list = [str(g) for g in genes]
+    if len(gene_list) == 0:
+        raise ValueError("No genes provided.")
+
+    taxon_id = _species_to_taxon_id(species)
+    base_dir = Path(string_data_dir) if string_data_dir is not None else _default_string_data_dir()
+    channels_req = [c.strip().lstrip("#") for c in (evidence_channels or []) if str(c).strip()]
+
+    # 1) Map genes -> STRING protein IDs
+    prot_df = _load_string_gene_id_map(species, string_data_dir)
+    lookup = prot_df.set_index("preferred_name")["#string_protein_id"]
+    proteins = {g: lookup.get(g) for g in gene_list}
+    proteins = {g: p for g, p in proteins.items() if p is not None}
+    if len(proteins) == 0:
+        raise ValueError("None of the supplied genes were found in STRING protein.info.")
+
+    # 2) Load the best available STRING links file (normalize headers, allow fallbacks)
+    links = None
+    links_path = None
+    read_errors = []
+    required_cols = {"protein1", "protein2", "combined_score"}
+
+    for cand in _string_link_candidates(base_dir, taxon_id):
+        try:
+            links = pd.read_csv(cand, sep="\s+", engine="python")
+            # strip leading '#' from headers (STRING sometimes uses #protein1)
+            links = links.rename(columns={c: c.lstrip("#") for c in links.columns})
+
+            # If combined_score is absent but an experimental/score column exists, reuse it
+            cols = set(links.columns)
+            if "combined_score" not in cols:
+                for alt in ["experimental", "experimental_score", "score"]:
+                    if alt in cols:
+                        links = links.rename(columns={alt: "combined_score"})
+                        cols.add("combined_score")
+                        break
+
+            # Skip this candidate if channel requirements cannot be satisfied
+            if channels_req and not set(channels_req).issubset(cols):
+                read_errors.append((cand, f"missing channels {set(channels_req) - cols}"))
+                links = None
+                continue
+
+            if required_cols.issubset(set(links.columns)):
+                links_path = cand
+                break
+            else:
+                read_errors.append((cand, f"missing {required_cols - set(links.columns)}"))
+                links = None
+        except Exception as e:
+            read_errors.append((cand, str(e)))
+            links = None
+
+    if links is None:
+        msg = "; ".join(f"{p}: {err}" for p, err in read_errors) or "no candidate files found"
+        raise FileNotFoundError(
+            f"Could not load a STRING links file for taxon {taxon_id}. Attempts: {msg}"
+        )
+
+    # 3) Filter to interactions within the user genes and above confidence (and channels if set)
+    protein_ids = set(proteins.values())
+    mask = (
+        links["protein1"].isin(protein_ids)
+        & links["protein2"].isin(protein_ids)
+        & (links["combined_score"] >= int(min_confidence))
+    )
+    if channels_req:
+        for ch in channels_req:
+            mask &= links[ch] > 0
+    sub = links[mask]
+
+    if sub.empty:
+        return ({}, None) if return_graph else {}
+
+    # 4) Build igraph
+    # Map protein IDs to gene symbols for readable vertices
+    prot_to_gene = {v: k for k, v in proteins.items()}
+    edges = [
+        (prot_to_gene[p1], prot_to_gene[p2], float(s))
+        for p1, p2, s in sub[["protein1", "protein2", "combined_score"]].itertuples(index=False)
+    ]
+
+    g = ig.Graph()
+    g.add_vertices(sorted(set(prot_to_gene.values())))
+    g.add_edges([(a, b) for a, b, _ in edges])
+    g.es["weight"] = [w for _, _, w in edges]
+
+    modules: Dict[str, List[str]] = {}
+
+    if clustering.lower() == "leiden" and g.ecount() > 0 and g.vcount() > 1:
+        try:
+            leiden = g.community_leiden(weights=g.es["weight"], resolution_parameter=float(resolution))
+            groups = leiden.as_cover().partition
+        except Exception:
+            groups = g.components().membership
+    else:
+        groups = g.components().membership
+
+    # Collect modules
+    group_to_genes: Dict[int, List[str]] = defaultdict(list)
+    for gene, grp in zip(g.vs["name"], groups):
+        group_to_genes[int(grp)].append(gene)
+
+    for idx, genes_in_group in sorted(group_to_genes.items(), key=lambda kv: -len(kv[1])):
+        if len(genes_in_group) == 1:
+            continue  # skip singletons; they have no supported interaction
+        modules[f"strmod_{idx}"] = sorted(genes_in_group)
+
+    if return_graph:
+        return modules, g
+    return modules
+
+
 def whoare_genes_neighbors(
     adata,
     gene: str,
