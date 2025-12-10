@@ -4,6 +4,10 @@ All notable changes to PySingleCellNet should be listed here. The definition of 
 
 ## [Unreleased]
 
+# TO FIX
+
+tl.score_gene_sets should add scores, one matrix to .obsm and not as columsn to .obs
+
 ### Changed
 - tl.cluster_subclusters layer should be None instead of counts 
 

@@ -37,7 +37,9 @@ from .gene import (
     name_gene_modules_by_annotation,
     whoare_genes_neighbors,
     what_module_has_gene,
-    find_string_physical_modules,
+    find_string_network_modules,
+    find_hybrid_gene_modules,
+    load_string_links_df,
     score_gene_sets,
     correlate_module_scores_with_pcs
 )
@@ -64,7 +66,9 @@ __all__ = [
     "name_gene_modules_by_annotation",
     "whoare_genes_neighbors",
     "what_module_has_gene",
-    "find_string_physical_modules",
+    "find_string_network_modules",
+    "find_hybrid_gene_modules",
+    "load_string_links_df",
     "score_gene_sets",
     "correlate_module_scores_with_pcs"
 ]

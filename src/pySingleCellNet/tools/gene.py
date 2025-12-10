@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union, Callable
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union, Callable, TYPE_CHECKING
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
@@ -10,6 +10,11 @@ import anndata as ad
 from scipy import sparse
 import igraph as ig
 from anndata import AnnData
+import warnings
+from sklearn.mixture import GaussianMixture
+
+if TYPE_CHECKING:  # for type hints without circular import
+    from ..string_io.api import StringEnv
 
 def build_gene_knn(
     adata,
@@ -422,6 +427,12 @@ def _load_string_gene_annotations(species: str, data_dir: Optional[str]) -> Dict
     return deduped
 
 
+@lru_cache(maxsize=16)
+def _load_string_gene_id_map_cached(species: str, data_dir: Optional[str]) -> pd.DataFrame:
+    """Cached loader for STRING protein.info (gene -> protein mapping)."""
+    return _load_string_gene_id_map(species, data_dir)
+
+
 def name_gene_modules_by_annotation(
     modules: Mapping[str, Sequence[str]],
     annotation_source: str,
@@ -533,18 +544,13 @@ def name_gene_modules_by_annotation(
 
 
 # ---------------------------------------------------------------------------
-# STRING physical-interaction modules
+# STRING network modules (based on links.detailed)
 # ---------------------------------------------------------------------------
 
 def _string_link_candidates(base_dir: Path, taxon_id: str):
-    """Yield candidate STRING link files in preference order."""
-    names = [
-        "protein.physical.links.full",
-        "protein.links.detailed",
-        "protein.links.full",
-        "protein.links",
-    ]
-    for stem in names:
+    """Yield candidate STRING link files (detailed links are required)."""
+    stems = ["protein.links.detailed"]
+    for stem in stems:
         p = base_dir / f"{taxon_id}.{stem}.v12.0.txt"
         if p.exists():
             yield p
@@ -554,7 +560,10 @@ def _string_link_candidates(base_dir: Path, taxon_id: str):
 
 
 def _load_string_gene_id_map(species: str, data_dir: Optional[str]) -> pd.DataFrame:
-    """Load STRING protein info and return dataframe with gene->protein mapping."""
+    """Load STRING protein info and return dataframe with gene->protein mapping.
+
+    Note: Parquet caching is handled in string_io.load; this remains TSV-focused.
+    """
     taxon_id = _species_to_taxon_id(species)
     base_dir = Path(data_dir) if data_dir is not None else _default_string_data_dir()
     protein_info_path = base_dir / f"{taxon_id}.protein.info.v12.0.txt"
@@ -568,7 +577,447 @@ def _load_string_gene_id_map(species: str, data_dir: Optional[str]) -> pd.DataFr
     return df
 
 
-def find_string_physical_modules(
+@lru_cache(maxsize=16)
+def _load_string_links_df(species: str, data_dir: Optional[str]) -> pd.DataFrame:
+    """Cached loader for STRING links.detailed DataFrame.
+
+    Parquet caching is handled in string_io.load; this function reads TSV/TSV.GZ.
+    """
+    taxon_id = _species_to_taxon_id(species)
+    base_dir = Path(data_dir) if data_dir is not None else _default_string_data_dir()
+
+    links = None
+    read_errors = []
+    required_cols = {"protein1", "protein2", "combined_score"}
+    for cand in _string_link_candidates(base_dir, taxon_id):
+        try:
+            df = pd.read_csv(cand, sep=r"\s+", engine="python")
+            df = df.rename(columns={c: c.lstrip("#") for c in df.columns})
+
+            cols = set(df.columns)
+            if "combined_score" not in cols:
+                for alt in ["experimental", "experimental_score", "score"]:
+                    if alt in cols:
+                        df = df.rename(columns={alt: "combined_score"})
+                        cols.add("combined_score")
+                        break
+
+            if required_cols.issubset(set(df.columns)):
+                links = df
+                break
+            else:
+                read_errors.append((cand, f"missing {required_cols - set(df.columns)}"))
+        except Exception as e:
+            read_errors.append((cand, str(e)))
+
+    if links is None:
+        msg = "; ".join(f"{p}: {err}" for p, err in read_errors) or "no candidate files found"
+        raise FileNotFoundError(
+            f"Could not load a STRING links file for taxon {taxon_id}. Attempts: {msg}"
+        )
+
+    return links
+
+
+def load_string_links_df(
+    species: str = "mouse",
+    string_data_dir: Optional[Union[str, Path]] = None,
+):
+    """Public helper to load (and cache) the STRING links table."""
+
+    return _load_string_links_df(
+        species,
+        None if string_data_dir is None else str(string_data_dir),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hybrid expression + prior (STRING / annotation sets) gene modules
+# ---------------------------------------------------------------------------
+
+def _normalize_csr_rows(mat: sparse.csr_matrix) -> sparse.csr_matrix:
+    """Row-normalize a CSR matrix to sum to 1, keeping zeros safe."""
+    if not sparse.isspmatrix_csr(mat):
+        mat = mat.tocsr()
+    row_sums = np.array(mat.sum(axis=1)).ravel()
+    row_sums[row_sums == 0] = 1.0
+    inv = 1.0 / row_sums
+    mat = sparse.diags(inv) @ mat
+    return mat
+
+
+def _topk_per_row_csr(mat: sparse.csr_matrix, k: int) -> sparse.csr_matrix:
+    """Keep top-k entries per row of a CSR matrix (by value)."""
+    if not sparse.isspmatrix_csr(mat):
+        mat = mat.tocsr()
+    mat = mat.tolil()
+    for i in range(mat.shape[0]):
+        row = mat.data[i]
+        idx = mat.rows[i]
+        if len(row) > k:
+            order = np.argsort(row)[-k:]
+            mat.data[i] = list(np.array(row)[order])
+            mat.rows[i] = list(np.array(idx)[order])
+    return mat.tocsr()
+
+
+def _resolve_gene_mask(adata, gene_mask) -> np.ndarray:
+    """Resolve gene mask from column name, iterable of names, or bool mask."""
+    var_names = adata.var_names
+    if gene_mask is None:
+        return np.ones(len(var_names), dtype=bool)
+    if isinstance(gene_mask, str):
+        if gene_mask not in adata.var.columns:
+            raise ValueError(f"gene_mask column '{gene_mask}' not in adata.var")
+        mask = adata.var[gene_mask].astype(bool).to_numpy()
+    elif isinstance(gene_mask, (list, tuple, set, pd.Index, np.ndarray)):
+        if len(gene_mask) == len(var_names) and all(isinstance(x, (bool, np.bool_)) for x in gene_mask):
+            mask = np.array(gene_mask, dtype=bool)
+        else:
+            names = set(str(g) for g in gene_mask)
+            mask = np.array([g in names for g in var_names], dtype=bool)
+    else:
+        raise ValueError("Unsupported gene_mask type")
+    return mask
+
+
+def _build_string_prior(
+    gene_list: Sequence[str],
+    links: pd.DataFrame,
+    protein_map: Mapping[str, str],
+    *,
+    min_confidence: int = 700,
+    evidence_channels: Optional[Sequence[str]] = None,
+    k_prior: Optional[int] = None,
+) -> sparse.csr_matrix:
+    """Build a STRING-based prior adjacency for the supplied gene list."""
+    gene_list = list(gene_list)
+    idx = {g: i for i, g in enumerate(gene_list)}
+    # map genes to protein ids, drop missing
+    g2p = {g: protein_map.get(g) for g in gene_list}
+    g2p = {g: p for g, p in g2p.items() if p is not None}
+    # filter links
+    protein_ids = set(g2p.values())
+    mask = (
+        links["protein1"].isin(protein_ids)
+        & links["protein2"].isin(protein_ids)
+        & (links["combined_score"] >= int(min_confidence))
+    )
+    channels_req = [c.strip().lstrip("#") for c in (evidence_channels or []) if str(c).strip()]
+    if channels_req:
+        channel_mask = np.zeros(len(links), dtype=bool)
+        for ch in channels_req:
+            if ch in links.columns:
+                channel_mask |= links[ch] > 0
+        mask &= channel_mask
+    sub = links[mask]
+    if sub.empty:
+        return sparse.csr_matrix((len(gene_list), len(gene_list)))
+
+    p2g = {v: k for k, v in g2p.items()}
+    rows = []
+    cols = []
+    vals = []
+    norm = 1000.0
+    for p1, p2, s in sub[["protein1", "protein2", "combined_score"]].itertuples(index=False):
+        g1 = p2g.get(p1)
+        g2 = p2g.get(p2)
+        if g1 is None or g2 is None or g1 == g2:
+            continue
+        i = idx[g1]
+        j = idx[g2]
+        rows.extend([i, j])
+        cols.extend([j, i])
+        w = float(s) / norm
+        vals.extend([w, w])
+    mat = sparse.csr_matrix((vals, (rows, cols)), shape=(len(gene_list), len(gene_list)))
+    if k_prior is not None and k_prior > 0:
+        mat = _topk_per_row_csr(mat, k_prior)
+    return _normalize_csr_rows(mat)
+
+
+def _build_annotation_prior(
+    gene_list: Sequence[str],
+    annotation_sets: Mapping[str, Sequence[str]],
+    *,
+    term_size_bounds: Tuple[int, int] = (5, 500),
+    method: str = "idf_jaccard",
+    k_prior: Optional[int] = None,
+) -> sparse.csr_matrix:
+    """Build prior adjacency from list-of-genes annotation sets (co-annotation)."""
+    genes = list(gene_list)
+    idx = {g: i for i, g in enumerate(genes)}
+    rows = []
+    cols = []
+    vals = []
+    # precompute idf
+    for term, members in annotation_sets.items():
+        uniq = [g for g in dict.fromkeys(members) if g in idx]
+        if len(uniq) < term_size_bounds[0] or len(uniq) > term_size_bounds[1]:
+            continue
+        idf = 1.0 / np.log1p(len(uniq))
+        for i in range(len(uniq)):
+            gi = uniq[i]
+            for j in range(i + 1, len(uniq)):
+                gj = uniq[j]
+                wi = idx[gi]
+                wj = idx[gj]
+                w = idf
+                rows.extend([wi, wj])
+                cols.extend([wj, wi])
+                vals.extend([w, w])
+    mat = sparse.csr_matrix((vals, (rows, cols)), shape=(len(genes), len(genes)))
+    if mat.nnz == 0:
+        return mat
+    if k_prior is not None and k_prior > 0:
+        mat = _topk_per_row_csr(mat, k_prior)
+    return _normalize_csr_rows(mat)
+
+
+def _build_expression_graph(
+    adata: AnnData,
+    k_expr: int = 5,
+    metric: str = "euclidean",
+    use_knn: bool = True,
+    normalize: bool = False,
+) -> Tuple[np.ndarray, sparse.csr_matrix]:
+    """Compute a gene kNN graph from expression, returning genes and connectivity."""
+    adt = adata.T.copy()
+    if metric == "correlation" and sparse.issparse(adt.X):
+        adt.X = adt.X.toarray()
+    sc.pp.neighbors(adt, n_neighbors=k_expr, knn=use_knn, metric=metric, n_pcs=0, key_added="gene_neighbors")
+    conn = adt.obsp["gene_neighbors_connectivities"].copy()
+    if normalize:
+        conn = _normalize_csr_rows(conn)
+    genes = np.array(adt.obs_names)
+    return genes, conn
+
+
+def find_hybrid_gene_modules(
+    adata: AnnData,
+    *,
+    # fusion weights
+    alpha: float = 0.5,                    # weight on expression (0..1)
+    # expression graph params
+    k_expr: int = 5,
+    expr_metric: str = "euclidean",
+    expr_use_knn: bool = True,
+    normalize_expr: bool = False,
+    expr_connectivities: Optional[sparse.csr_matrix] = None,
+    # prior options
+    use_string: bool = True,
+    string_env: Optional["StringEnv"] = None,
+    string_data_dir: Optional[Union[str, Path]] = None,
+    string_species: str = "mouse",
+    min_confidence: int = 700,
+    evidence_channels: Optional[Sequence[str]] = None,
+    k_prior: Optional[int] = None,
+    annotation_sets: Optional[Mapping[str, Sequence[str]]] = None,
+    term_size_bounds: Tuple[int, int] = (5, 500),
+    # mask
+    gene_mask: Optional[Union[str, Sequence[str], Sequence[bool]]] = None,
+    # clustering
+    resolution: float = 1.0,
+    clustering: str = "leiden",
+    min_module_size: int = 2,
+    # fused graph sparsification
+    k_fused: Optional[int] = None,
+    normalize_fused: bool = False,
+    # storage
+    uns_key: str = "hybrid_modules",
+    return_graph: bool = False,
+    random_state: Optional[int] = 0,
+    verbose: str = "high",
+) -> Union[Dict[str, List[str]], Tuple[Dict[str, List[str]], ig.Graph]]:
+    """Hybrid gene modules using expression + prior (STRING or annotation sets).
+
+    Steps:
+      1) Apply optional gene_mask (e.g., highly_variable) to limit genes.
+      2) Build expression kNN (unless alpha=0 or expr_connectivities provided).
+      3) Build prior graph (STRING detailed links and/or annotation co-membership).
+      4) Fuse: A = alpha * A_expr + (1-alpha) * A_prior; symmetrize, sparsify, normalize.
+      5) Leiden/connected-components on fused graph; drop tiny modules.
+
+    Args:
+        adata: AnnData with genes (vars) × cells (obs).
+        alpha: Weight on expression graph (0..1). alpha=0 uses prior only; expression kNN is skipped.
+        k_expr: Neighbors for expression kNN.
+        expr_metric: Distance metric for expression kNN.
+        expr_use_knn: Hard kNN vs Gaussian kernel (scanpy neighbors `knn` flag).
+        expr_connectivities: Precomputed gene×gene CSR to reuse (skips recompute).
+        use_string: Whether to use STRING prior.
+        string_env/string_data_dir/string_species: Where/how to load STRING.
+        min_confidence/evidence_channels: Filters for STRING edges.
+        k_prior: Optional top-k per row on prior.
+        annotation_sets: Optional dict of term -> genes to build co-annotation prior.
+        term_size_bounds: Min/max term sizes to keep for annotation prior.
+        gene_mask: Column name, iterable of genes, or bool mask to subset genes.
+        resolution: Leiden resolution.
+        clustering: "leiden" or "components".
+        min_module_size: Drop modules smaller than this.
+        k_fused: Top-k per row after fusion (None/0 disables).
+        normalize_fused: Row-normalize fused matrix after sparsification.
+        uns_key: Where to store modules in adata.uns.
+        return_graph: Also return igraph graph if True.
+        random_state: Seed for Leiden.
+        verbose: "none" | "low" | "high" progress logging.
+
+    Returns:
+        dict of modules (and igraph if return_graph=True).
+    """
+
+    def _log(msg: str, level="high"):
+        levels = {"none": 0, "low": 1, "high": 2}
+        if levels.get(verbose, 2) >= levels.get(level, 2):
+            print(f"[hybrid] {msg}")
+
+    _log("start hybrid module discovery", "high")
+
+    # 0) resolve mask
+    _log("resolving gene mask", "high")
+    mask_bool = _resolve_gene_mask(adata, gene_mask)
+    ad_sub = adata[:, mask_bool].copy()
+    genes = np.array(ad_sub.var_names)
+
+    # 1) expression graph (skip if alpha == 0 and no supplied connectivities)
+    if alpha == 0 and expr_connectivities is None:
+        _log("alpha=0 -> skipping expression graph build", "low")
+        A_expr = sparse.csr_matrix((len(genes), len(genes)))
+    else:
+        _log("building expression graph", "high")
+        if expr_connectivities is not None:
+            expr_genes = genes
+            A_expr = expr_connectivities.tocsr()
+            if normalize_expr:
+                A_expr = _normalize_csr_rows(A_expr)
+        else:
+            expr_genes, A_expr = _build_expression_graph(ad_sub, k_expr=k_expr, metric=expr_metric, use_knn=expr_use_knn, normalize=normalize_expr)
+        if not np.array_equal(expr_genes, genes):
+            raise ValueError("Expression graph genes do not align with masked genes")
+
+    # 2) prior graph
+    A_prior = sparse.csr_matrix(A_expr.shape)
+    prior_source = None
+    if use_string and string_env is not None:
+        links = string_env.links_df
+        protein_map = string_env.protein_map
+        prior_source = "string_env"
+    elif use_string:
+        links = _load_string_links_df(string_species, None if string_data_dir is None else str(string_data_dir))
+        prot_df = _load_string_gene_id_map_cached(string_species, None if string_data_dir is None else str(string_data_dir))
+        protein_map = prot_df.set_index("preferred_name")["#string_protein_id"].to_dict()
+        prior_source = "string"
+    elif annotation_sets is not None:
+        prior_source = "annotation"
+
+    if prior_source == "string_env" or prior_source == "string":
+        _log("building STRING prior graph", "high")
+        A_prior = _build_string_prior(
+            genes,
+            links,
+            protein_map,
+            min_confidence=min_confidence,
+            evidence_channels=evidence_channels,
+            k_prior=k_prior,
+        )
+    if annotation_sets is not None:
+        _log("building annotation prior graph", "high")
+        A_ann = _build_annotation_prior(
+            genes,
+            annotation_sets,
+            term_size_bounds=term_size_bounds,
+            k_prior=k_prior,
+        )
+        if prior_source is None:
+            A_prior = A_ann
+            prior_source = "annotation"
+        else:
+            # if both string and annotation provided, average them
+            A_prior = _normalize_csr_rows(A_prior + A_ann)
+            prior_source = prior_source + "+annotation"
+
+    # 3) fuse
+    alpha = float(alpha)
+    alpha = min(max(alpha, 0.0), 1.0)
+    if alpha == 1.0:
+        # Expression-only: use raw expression graph (closest to find_gene_modules behavior)
+        _log("alpha=1 -> using expression graph without fusion pruning", "low")
+        A_fused = A_expr.copy()
+    else:
+        A_fused = (alpha * A_expr) + ((1.0 - alpha) * A_prior)
+        # symmetrize for stability
+        A_fused = (A_fused + A_fused.T) * 0.5
+        # sparsify fused graph to avoid over-dense communities
+        k_fuse = k_fused if k_fused is not None else max(k_expr if alpha > 0 else 0, k_prior or 0)
+        if k_fuse is not None and k_fuse > 0:
+            _log(f"sparsifying fused graph to top-{k_fuse} per row", "high")
+            A_fused = _topk_per_row_csr(A_fused, k_fuse)
+        if normalize_fused:
+            A_fused = _normalize_csr_rows(A_fused.tocsr())
+
+    # 4) cluster
+    _log("clustering fused graph", "high")
+    coo = A_fused.tocoo()
+    mask_up = coo.row < coo.col
+    edges = list(zip(coo.row[mask_up].tolist(), coo.col[mask_up].tolist()))
+    weights = coo.data[mask_up].tolist()
+    g = ig.Graph(n=len(genes), edges=edges, directed=False)
+    if weights:
+        g.es["weight"] = weights
+    g.vs["name"] = list(genes)
+    _log(f"graph v={g.vcount()} e={g.ecount()} (weights set={bool(weights)})", "low")
+
+    if clustering.lower() == "leiden" and g.ecount() > 0 and g.vcount() > 1:
+        try:
+            leiden = g.community_leiden(weights=g.es["weight"], resolution_parameter=float(resolution), random_state=random_state)
+            groups = leiden.as_cover().partition
+            _log(f"leiden found {len(set(groups))} communities", "low")
+        except Exception as e:
+            _log(f"leiden failed ({e}); falling back to components", "low")
+            groups = g.components().membership
+    else:
+        groups = g.components().membership
+        _log(f"components fallback found {len(set(groups))} components", "low")
+
+    group_to_genes: Dict[int, List[str]] = defaultdict(list)
+    for gene, grp in zip(genes, groups):
+        group_to_genes[int(grp)].append(gene)
+
+    modules = {}
+    for idx, glist in sorted(group_to_genes.items(), key=lambda kv: -len(kv[1])):
+        if len(glist) < min_module_size:
+            continue
+        modules[f"hmod_{idx}"] = sorted(glist)
+
+    _log(f"found {len(modules)} modules", "low")
+
+    # store
+    adata.uns[uns_key] = modules
+    meta_key = f"{uns_key}__meta"
+    adata.uns[meta_key] = {
+        "alpha": alpha,
+        "k_expr": k_expr,
+        "expr_metric": expr_metric,
+        "expr_use_knn": expr_use_knn,
+        "k_prior": k_prior,
+        "min_confidence": min_confidence,
+        "evidence_channels": list(evidence_channels or []),
+        "prior_source": prior_source,
+        "resolution": resolution,
+        "clustering": clustering,
+        "min_module_size": min_module_size,
+        "gene_mask": gene_mask if gene_mask is None or isinstance(gene_mask, str) else "<sequence>",
+        "n_modules": len(modules),
+        "module_sizes": {k: len(v) for k, v in modules.items()},
+        "verbose": verbose,
+    }
+
+    if return_graph:
+        return modules, g
+    return modules
+
+
+def find_string_network_modules(
     genes: Sequence[str],
     *,
     species: str = "mouse",
@@ -578,8 +1027,11 @@ def find_string_physical_modules(
     clustering: str = "leiden",
     resolution: float = 1.0,
     return_graph: bool = False,
+    links_df: Optional[pd.DataFrame] = None,
+    env: Optional["StringEnv"] = None,
+    protein_map: Optional[Mapping[str, str]] = None,
 ) -> Union[Dict[str, List[str]], Tuple[Dict[str, List[str]], ig.Graph]]:
-    """Cluster a user-supplied gene list into STRING physical-interaction modules.
+    """Cluster a user-supplied gene list into STRING network modules (detailed links).
 
     Parameters
     ----------
@@ -600,6 +1052,14 @@ def find_string_physical_modules(
         Leiden resolution parameter (ignored if clustering="components").
     return_graph
         If True, also return the igraph graph used for clustering.
+    links_df
+        Optional pre-loaded STRING links DataFrame to reuse across calls (must have
+        columns protein1, protein2, combined_score and any required evidence channels).
+    env
+        Optional StringEnv (from pySingleCellNet.string_io) providing cached links,
+        protein map, and resolved data_dir/species.
+    protein_map
+        Optional dict mapping gene -> STRING protein_id; overrides automatic loading.
 
     Returns
     -------
@@ -618,60 +1078,36 @@ def find_string_physical_modules(
     if len(gene_list) == 0:
         raise ValueError("No genes provided.")
 
+    # Resolve species/data dir from env if provided
+    if env is not None:
+        species = env.species
+        string_data_dir = env.data_dir
+        if links_df is None:
+            links_df = env.links_df
+        if protein_map is None:
+            protein_map = env.protein_map
+
     taxon_id = _species_to_taxon_id(species)
     base_dir = Path(string_data_dir) if string_data_dir is not None else _default_string_data_dir()
     channels_req = [c.strip().lstrip("#") for c in (evidence_channels or []) if str(c).strip()]
 
-    # 1) Map genes -> STRING protein IDs
-    prot_df = _load_string_gene_id_map(species, string_data_dir)
-    lookup = prot_df.set_index("preferred_name")["#string_protein_id"]
+    # 1) Map genes -> STRING protein IDs (cached)
+    if protein_map is not None:
+        lookup = protein_map
+    else:
+        prot_df = _load_string_gene_id_map_cached(species, None if string_data_dir is None else str(string_data_dir))
+        lookup = prot_df.set_index("preferred_name")["#string_protein_id"]
+
     proteins = {g: lookup.get(g) for g in gene_list}
     proteins = {g: p for g, p in proteins.items() if p is not None}
     if len(proteins) == 0:
         raise ValueError("None of the supplied genes were found in STRING protein.info.")
 
-    # 2) Load the best available STRING links file (normalize headers, allow fallbacks)
-    links = None
-    links_path = None
-    read_errors = []
-    required_cols = {"protein1", "protein2", "combined_score"}
-
-    for cand in _string_link_candidates(base_dir, taxon_id):
-        try:
-            links = pd.read_csv(cand, sep="\s+", engine="python")
-            # strip leading '#' from headers (STRING sometimes uses #protein1)
-            links = links.rename(columns={c: c.lstrip("#") for c in links.columns})
-
-            # If combined_score is absent but an experimental/score column exists, reuse it
-            cols = set(links.columns)
-            if "combined_score" not in cols:
-                for alt in ["experimental", "experimental_score", "score"]:
-                    if alt in cols:
-                        links = links.rename(columns={alt: "combined_score"})
-                        cols.add("combined_score")
-                        break
-
-            # Skip this candidate if channel requirements cannot be satisfied
-            if channels_req and not set(channels_req).issubset(cols):
-                read_errors.append((cand, f"missing channels {set(channels_req) - cols}"))
-                links = None
-                continue
-
-            if required_cols.issubset(set(links.columns)):
-                links_path = cand
-                break
-            else:
-                read_errors.append((cand, f"missing {required_cols - set(links.columns)}"))
-                links = None
-        except Exception as e:
-            read_errors.append((cand, str(e)))
-            links = None
-
-    if links is None:
-        msg = "; ".join(f"{p}: {err}" for p, err in read_errors) or "no candidate files found"
-        raise FileNotFoundError(
-            f"Could not load a STRING links file for taxon {taxon_id}. Attempts: {msg}"
-        )
+    # 2) Load the best available STRING links file (cached unless overridden)
+    if links_df is not None:
+        links = links_df
+    else:
+        links = _load_string_links_df(species, None if string_data_dir is None else str(string_data_dir))
 
     # 3) Filter to interactions within the user genes and above confidence (and channels if set)
     protein_ids = set(proteins.values())
@@ -681,8 +1117,11 @@ def find_string_physical_modules(
         & (links["combined_score"] >= int(min_confidence))
     )
     if channels_req:
+        channel_mask = np.zeros(len(links), dtype=bool)
         for ch in channels_req:
-            mask &= links[ch] > 0
+            if ch in links.columns:
+                channel_mask |= links[ch] > 0
+        mask &= channel_mask
     sub = links[mask]
 
     if sub.empty:
@@ -725,6 +1164,16 @@ def find_string_physical_modules(
     if return_graph:
         return modules, g
     return modules
+
+
+def find_string_physical_modules(*args, **kwargs):
+    """Backward-compat wrapper for the renamed find_string_network_modules."""
+    warnings.warn(
+        "`find_string_physical_modules` has been renamed to `find_string_network_modules` (uses STRING links.detailed).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return find_string_network_modules(*args, **kwargs)
 
 
 def whoare_genes_neighbors(
@@ -860,7 +1309,7 @@ def score_gene_sets(
     # ---- misc ----
     min_genes_per_set: int = 1,
     case_insensitive: bool = False,
-    obs_prefix: Optional[str] = None,
+    obsm_name: Optional[str] = None,
     return_dataframe: bool = True,
 ) -> pd.DataFrame:
     """Compute per-cell gene-set scores with both value-based and rank-based (AUCell/UCell) modes.
@@ -895,11 +1344,11 @@ def score_gene_sets(
         use_average_ranks: If True, uses average-tie ranks (scipy.stats.rankdata); slower.
         min_genes_per_set: Require at least this many present genes to score a set (else NaN).
         case_insensitive: Case-insensitive gene matching against `var_names`.
-        obs_prefix: If provided, also writes scores to `adata.obs[f"{obs_prefix}{name}"]`.
+        obsm_name: If provided, stores the score DataFrame in `adata.obsm[obsm_name]`; if None, leaves adata unchanged.
         return_dataframe: If True, return a DataFrame; else return ndarray.
 
     Returns:
-        DataFrame (cells × sets) of scores (and optionally writes to `adata.obs`).
+        DataFrame (cells × sets) of scores (and optionally writes to `adata.obsm`).
 
     Notes:
         • Rank-based scores ignore clipping/min–max (ranks are invariant to monotone transforms).
@@ -1036,9 +1485,8 @@ def score_gene_sets(
                     scores[name][start:end] = out
 
         df = pd.DataFrame(scores, index=adata.obs_names)
-        if obs_prefix:
-            for k in df.columns:
-                adata.obs[f"{obs_prefix}{k}"] = df[k].values
+        if obsm_name:
+            adata.obsm[obsm_name] = df
         return df if return_dataframe else df.values
 
     # ======================= VALUE-BASED BRANCH =======================
@@ -1127,9 +1575,183 @@ def score_gene_sets(
         out[name] = agg_fn(A)
 
     df = pd.DataFrame(out, index=adata.obs_names)
-    if obs_prefix:
-        for k in df.columns:
-            adata.obs[f"{obs_prefix}{k}"] = df[k].values
+    if obsm_name:
+        adata.obsm[obsm_name] = df
+    return df if return_dataframe else df.values
+
+
+
+def score_gene_sets_detect_mixture(
+    adata,
+    gene_sets: GeneSetInput,
+    *,
+    layer: Optional[str] = "counts",
+    max_cells_for_fit: int = 5000,
+    batch_size: int = 2048,
+    random_state: Optional[int] = 0,
+    min_genes_per_set: int = 1,
+    case_insensitive: bool = False,
+    obsm_name: Optional[str] = None,
+    return_dataframe: bool = True,
+) -> pd.DataFrame:
+    """
+    Score gene sets by detection fraction using per-gene 2-component Gaussian mixtures on log-counts.
+
+    Pipeline:
+      1) Collect genes present in the provided sets.
+      2) Fit a 2-component Gaussian mixture to log1p(raw_counts) for each gene (on a cell subset).
+         The higher-mean component is treated as the "on" state.
+         The decision threshold is the posterior-equality point of the two Gaussians.
+      3) A gene is detected in a cell if log1p(count) > threshold for that gene.
+      4) For each cell × set, score = (# detected genes in set) / (set size).
+
+    Notes:
+      • Designed for speed: fits only the union of set genes; mixtures are fit on at most `max_cells_for_fit` cells;
+        scoring streams over cells in batches and operates on dense slices of the relevant columns.
+      • If a gene's mixture fit collapses (nearly unimodal) the threshold is set to +inf, so that gene never counts as detected.
+      • Uses `adata.layers[layer]` (expected to hold raw counts); if `layer` is None, falls back to `adata.X`.
+    Args:
+        adata: AnnData object.
+        gene_sets: Dict[name -> genes], list of gene lists, or name of adata.uns key.
+        layer: Matrix to use (expected raw counts); None falls back to adata.X.
+        max_cells_for_fit: Subsample size for fitting mixtures per gene.
+        batch_size: Batch size for scoring phase.
+        random_state: RNG seed for subsampling and mixture init.
+        min_genes_per_set: Require at least this many present genes to score a set (else NaN).
+        case_insensitive: Case-insensitive gene matching against var_names.
+        obsm_name: If provided, stores the score DataFrame in adata.obsm[obsm_name]; if None, leaves adata unchanged.
+        return_dataframe: If True, return a DataFrame; else return ndarray.
+    """
+
+    def _gaussian_intersection(mu0, sig0, w0, mu1, sig1, w1) -> float:
+        """Return x where w0*N(mu0,sig0)=w1*N(mu1,sig1); choose the root between means if possible."""
+        var0, var1 = sig0 * sig0, sig1 * sig1
+        if var0 <= 0 or var1 <= 0:
+            return np.inf
+        a = 0.5 * (1.0 / var1 - 1.0 / var0)
+        b = (mu0 / var0) - (mu1 / var1)
+        c = 0.5 * (mu1 * mu1 / var1 - mu0 * mu0 / var0) + np.log((w1 * sig0) / (w0 * sig1))
+        if abs(a) < 1e-12:  # nearly linear
+            if abs(b) < 1e-12:
+                return np.inf
+            return -c / b
+        disc = b * b - 4 * a * c
+        if disc < 0:
+            return np.inf
+        roots = np.array([(-b - np.sqrt(disc)) / (2 * a), (-b + np.sqrt(disc)) / (2 * a)])
+        lo, hi = (mu0, mu1) if mu0 < mu1 else (mu1, mu0)
+        between = roots[(roots >= lo) & (roots <= hi)]
+        if between.size:
+            return float(between[0])
+        # fallback: pick root closer to midpoint
+        mid = 0.5 * (mu0 + mu1)
+        return float(roots[np.argmin(np.abs(roots - mid))])
+
+    # ---- resolve gene sets ----
+    if isinstance(gene_sets, str):
+        if gene_sets not in adata.uns:
+            raise ValueError(f"gene_sets='{gene_sets}' not found in adata.uns")
+        gs_map = dict(adata.uns[gene_sets])
+    elif isinstance(gene_sets, Mapping):
+        gs_map = {str(k): list(v) for k, v in gene_sets.items()}
+    else:
+        gs_map = {f"set_{i+1}": list(v) for i, v in enumerate(gene_sets)}
+    if not gs_map:
+        raise ValueError("No gene sets provided.")
+
+    X = adata.layers[layer] if layer is not None else adata.X
+    n_cells, n_genes = X.shape
+    var_names = adata.var_names.astype(str)
+
+    # name lookup
+    if case_insensitive:
+        lut = {g.lower(): i for i, g in enumerate(var_names)}
+        def _loc(g: str) -> int: return lut.get(g.lower(), -1)
+    else:
+        lut = {g: i for i, g in enumerate(var_names)}
+        def _loc(g: str) -> int: return lut.get(g, -1)
+
+    # map sets -> present indices
+    present_idx: Dict[str, np.ndarray] = {}
+    for name, genes in gs_map.items():
+        idx = sorted({_loc(str(g)) for g in genes if _loc(str(g)) >= 0})
+        present_idx[name] = np.array(idx, dtype=int)
+
+    # collect unique gene indices
+    all_idx: List[int] = []
+    for idx in present_idx.values():
+        all_idx.extend(idx.tolist())
+    uniq_idx = np.array(sorted(set(all_idx)), dtype=int)
+    if uniq_idx.size == 0:
+        raise ValueError("None of the provided genes are present in adata.var_names.")
+
+    # sample cells for fitting
+    rng = np.random.default_rng(random_state)
+    if n_cells <= max_cells_for_fit:
+        fit_rows = np.arange(n_cells, dtype=int)
+    else:
+        fit_rows = rng.choice(n_cells, size=max_cells_for_fit, replace=False)
+
+    # slice and log-transform for fitting
+    X_fit = X[np.ix_(fit_rows, uniq_idx)] if sparse.issparse(X) else np.asarray(X)[np.ix_(fit_rows, uniq_idx)]
+    X_fit = X_fit.toarray() if sparse.issparse(X_fit) else np.asarray(X_fit)
+    X_fit = np.log1p(X_fit)
+
+    thresholds = np.full(uniq_idx.size, np.inf, dtype=float)
+    gm = GaussianMixture(
+        n_components=2,
+        covariance_type="full",
+        max_iter=50,
+        random_state=random_state,
+        init_params="kmeans"
+    )
+    for j in range(uniq_idx.size):
+        x = X_fit[:, j].reshape(-1, 1)
+        # guard: if almost all zeros, mixture is not informative
+        if np.count_nonzero(x) < 3:
+            thresholds[j] = np.inf
+            continue
+        try:
+            gm.fit(x)
+            means = gm.means_.flatten()
+            order = np.argsort(means)
+            mu0, mu1 = means[order[0]], means[order[1]]
+            w0, w1 = gm.weights_[order[0]], gm.weights_[order[1]]
+            sig0 = np.sqrt(gm.covariances_[order[0]].ravel()[0])
+            sig1 = np.sqrt(gm.covariances_[order[1]].ravel()[0])
+            if (mu1 - mu0) < 1e-3 or min(w0, w1) < 1e-3:
+                thresholds[j] = np.inf
+                continue
+            thr = _gaussian_intersection(mu0, sig0, w0, mu1, sig1, w1)
+            thresholds[j] = thr
+        except Exception:
+            thresholds[j] = np.inf
+
+    # compact column map for later slicing
+    compact = {j: k for k, j in enumerate(uniq_idx)}
+    set_cols: Dict[str, np.ndarray] = {}
+    for name, idx in present_idx.items():
+        cols = np.array([compact[j] for j in idx], dtype=int)
+        set_cols[name] = cols
+
+    # output container
+    scores = {name: np.full(n_cells, np.nan, dtype=float) for name in gs_map.keys()}
+
+    # stream over cells
+    for start in range(0, n_cells, batch_size):
+        end = min(n_cells, start + batch_size)
+        sub = X[start:end, uniq_idx]
+        sub = sub.toarray() if sparse.issparse(sub) else np.asarray(sub)
+        sub = np.log1p(sub)
+        detected = sub > thresholds[None, :]
+        for name, cols in set_cols.items():
+            if cols.size < min_genes_per_set:
+                continue
+            scores[name][start:end] = detected[:, cols].mean(axis=1)
+
+    df = pd.DataFrame(scores, index=adata.obs_names)
+    if obsm_name:
+        adata.obsm[obsm_name] = df
     return df if return_dataframe else df.values
 
 
