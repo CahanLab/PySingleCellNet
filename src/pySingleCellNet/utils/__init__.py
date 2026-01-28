@@ -15,21 +15,17 @@ from .adataTools import (
     drop_pcs_from_embedding
 )
 
-#from .gene import (
-#    extract_top_bottom_genes,
-#    pull_out_genes,
-#    pull_out_genes_v2,
-#)
-
-#from .cell import (
-#)
 
 from .annotation import (
     create_gene_structure_dict_by_stage,
     filter_genes_dict,
     write_gmt,
     read_gmt,
-    filter_gene_list
+    filter_gene_list,
+    ann_set_up,
+    annSetUp,  # deprecated alias
+    get_genes_from_go,
+    getGenesFromGO,  # deprecated alias
 )
 
 from .colors import (
@@ -58,14 +54,15 @@ __all__ = [
     "filter_anndata_slots",
     "filter_adata_by_group_size",
     "drop_pcs_from_embedding",
-#    "extract_top_bottom_genes",
-#    "pull_out_genes",
-#    "pull_out_genes_v2",
     "create_gene_structure_dict_by_stage",
     "filter_genes_dict",
     "write_gmt",
     "read_gmt",
     "filter_gene_list",
+    "ann_set_up",
+    "annSetUp",
+    "get_genes_from_go",
+    "getGenesFromGO",
     "get_unique_colors",
     "read_broken_geo_mtx",
     "build_knn_graph",

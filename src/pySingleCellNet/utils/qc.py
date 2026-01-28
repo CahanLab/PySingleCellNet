@@ -3,7 +3,6 @@ import pandas as pd
 import scanpy as sc
 from anndata import AnnData
 from scipy.stats import median_abs_deviation
-# import anndata as ad
 
 def call_outlier_cells(adata, metric = ["total_counts"], nmads = 5):
     """

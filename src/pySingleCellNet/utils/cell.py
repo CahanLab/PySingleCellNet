@@ -2,14 +2,9 @@ from __future__ import annotations
 from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
-# from anndata import AnnData
-# import matplotlib.pyplot as plt
 import scanpy as sc
 import anndata as ad
-# from scipy.sparse import issparse
-# from alive_progress import alive_bar
 from scipy.stats import median_abs_deviation, ttest_ind
-# import string
 import igraph as ig
 from scipy import sparse
 from sklearn.decomposition import PCA

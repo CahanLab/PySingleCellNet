@@ -3,15 +3,9 @@ import pandas as pd
 import scanpy as sc
 import anndata as ad
 from anndata import AnnData
-# from sklearn.ensemble import RandomForestClassifier
-# from scipy.sparse import csr_matrix
 import warnings
-# from .utils import *
-# from .tsp_rf import *
 import gseapy as gp
 import os
-# import anndata
-# import pySingleCellNet as pySCN
 import copy
 import igraph as ig
 from collections import defaultdict
@@ -327,44 +321,3 @@ def collect_gsea_results_from_dict(
 
 
 
-def old_collect_gsea_results_from_dict(
-    gsea_dict2: dict,
-    fdr_thr=0.25
-):
-    """Collect and filter GSEA results from a dictionary of GSEA objects.
-
-    Aggregates normalized enrichment scores (NES) for each cell type 
-    across all gene sets, applying an FDR threshold to filter out 
-    insignificant results.
-
-    Args:
-        gsea_dict2 (dict): Dictionary mapping cell types to GSEA result objects.
-        fdr_thr (float, optional): FDR threshold above which NES values are set to 0. 
-            Defaults to 0.25.
-
-    Returns:
-        pd.DataFrame: DataFrame with gene sets as rows and cell types as columns 
-            containing filtered NES values.
-    """
-    import copy  # Ensure copy is imported if not already
-    gsea_dict = copy.deepcopy(gsea_dict2)
-    pathways = pd.Index([])
-    cell_types = list(gsea_dict.keys())
-
-    for cell_type in cell_types:
-        tmpRes = gsea_dict[cell_type].res2d
-        gene_set_names = list(tmpRes['Term'])
-        pathways = pathways.union(gene_set_names)
-        
-    nes_df = pd.DataFrame(0, columns=cell_types, index=pathways)
-
-    for cell_type in cell_types:
-        ct_df = gsea_dict[cell_type].res2d
-        ct_df.index = ct_df['Term']
-        ct_df.loc[lambda df: df['FDR q-val'] > fdr_thr, "NES"] = 0
-        nes_df[cell_type] = ct_df["NES"]
-
-    nes_df = nes_df.apply(pd.to_numeric, errors='coerce')
-    return nes_df
-
-    

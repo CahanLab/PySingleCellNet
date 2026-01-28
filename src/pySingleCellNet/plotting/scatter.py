@@ -8,7 +8,6 @@ import warnings
 import umap
 import anndata as ad
 import igraph as ig
-# from igraph import Graph
 from palettable.colorbrewer.qualitative import Set2_6
 from palettable.tableau import GreenOrange_6
 from palettable.cartocolors.qualitative import Safe_6

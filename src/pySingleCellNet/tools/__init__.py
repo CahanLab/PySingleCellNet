@@ -34,20 +34,21 @@ from .comparison import (
 from .gene import (
     build_gene_knn,
     find_gene_modules,
-    name_gene_modules_by_annotation,
     whoare_genes_neighbors,
     what_module_has_gene,
-    find_string_network_modules,
-    find_hybrid_gene_modules,
-    load_string_links_df,
     score_gene_sets,
     correlate_module_scores_with_pcs
+)
+
+from .rank_class import (
+    find_sig_genes,
+    findSigGenes,  # deprecated alias
 )
 
 # API
 __all__ = [
     "cluster_alot",
-    "cluster_subcluster",
+    "cluster_subclusters",
     "clustering_quality_vs_nn_summary",
     "discover_cell_cliques",
     "classify_anndata",
@@ -63,13 +64,11 @@ __all__ = [
     "deg",
     "build_gene_knn",
     "find_gene_modules",
-    "name_gene_modules_by_annotation",
     "whoare_genes_neighbors",
     "what_module_has_gene",
-    "find_string_network_modules",
-    "find_hybrid_gene_modules",
-    "load_string_links_df",
     "score_gene_sets",
-    "correlate_module_scores_with_pcs"
+    "correlate_module_scores_with_pcs",
+    "find_sig_genes",
+    "findSigGenes",
 ]
 

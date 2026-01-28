@@ -176,50 +176,6 @@ def read_broken_geo_mtx(path: str, prefix: str) -> ad.AnnData:
     return adata
 
 
-# outdated
-def compute_mean_expression_per_cluster(
-    adata,
-    cluster_key
-):
-    """
-    Compute mean gene expression for each gene in each cluster, create a new anndata object, and store it in adata.uns.
-
-    Parameters:
-    - adata : anndata.AnnData
-        The input AnnData object with labeled cell clusters.
-    - cluster_key : str
-        The key in adata.obs where the cluster labels are stored.
-
-    Returns:
-    - anndata.AnnData
-        The modified AnnData object with the mean expression anndata stored in uns['mean_expression'].
-    """
-    if cluster_key not in adata.obs.columns:
-        raise ValueError(f"{cluster_key} not found in adata.obs")
-
-    # Extract unique cluster labels
-    clusters = adata.obs[cluster_key].unique().tolist()
-
-    # Compute mean expression for each cluster
-    mean_expressions = []
-    for cluster in clusters:
-        cluster_cells = adata[adata.obs[cluster_key] == cluster, :]
-        mean_expression = np.mean(cluster_cells.X, axis=0).A1 if issparse(cluster_cells.X) else np.mean(cluster_cells.X, axis=0)
-        mean_expressions.append(mean_expression)
-
-    # Convert to matrix
-    mean_expression_matrix = np.vstack(mean_expressions)
-    
-    # Create a new anndata object
-    mean_expression_adata = sc.AnnData(X=mean_expression_matrix, 
-                                       var=pd.DataFrame(index=adata.var_names), 
-                                       obs=pd.DataFrame(index=clusters))
-    
-    # Store this new anndata object in adata.uns
-    adata.uns['mean_expression'] = mean_expression_adata
-    #return adata
-
-
 def find_elbow(
     adata
 ):
@@ -452,30 +408,6 @@ def reassign_selected_clusters(
     adata.obs[new_label] = new_assignments
     # make sure type is category, seems to be needed for sc.tl.dendrogram
     adata.obs[new_label] = adata.obs[new_label].astype('category')
-
-
-# a special case of adataTools::filter_adata_by_group_size, deprecate
-def remove_singleton_groups(adata: ad.AnnData, groupby: str) -> ad.AnnData:
-    """
-    Remove groups with only a single cell from an AnnData object.
-
-    Args:
-        adata (anndata.AnnData): An AnnData object.
-        groupby (str): The column in `.obs` to group by.
-
-    Returns:
-        anndata.AnnData: A new AnnData object with singleton groups removed.
-    """
-    # Get the group sizes
-    group_sizes = adata.obs[groupby].value_counts()
-    # Filter out groups with only one cell
-    non_singleton_groups = group_sizes[group_sizes > 1].index
-    # Subset the AnnData object to exclude singleton groups
-    filtered_adata = adata[adata.obs[groupby].isin(non_singleton_groups)].copy()
-    
-    return filtered_adata
-
-
 
 
 

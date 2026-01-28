@@ -1,8 +1,7 @@
+import warnings
 import numpy as np
 import pandas as pd
-# import matplotlib.pyplot as plt
 import scanpy as sc
-#import mygene
 import re
 import csv
 from collections import defaultdict
@@ -125,12 +124,58 @@ def filter_gene_list(genelist, min_genes, max_genes=1e6):
     filtered_dict = {key: value for key, value in genelist.items() if min_genes <= len(value) <= max_genes}
     return filtered_dict
 
-def annSetUp(species="mmusculus"):
-    annot = sc.queries.biomart_annotations(species,["external_gene_name", "go_id"],)
+def ann_set_up(species: str = "mmusculus") -> pd.DataFrame:
+    """Fetch gene annotations from BioMart.
+
+    Retrieves gene names and GO IDs from Ensembl BioMart for the specified species.
+
+    Args:
+        species: Species name for BioMart query. Defaults to "mmusculus".
+
+    Returns:
+        DataFrame with columns 'external_gene_name' and 'go_id'.
+
+    Example:
+        >>> annot = ann_set_up(species="hsapiens")
+    """
+    annot = sc.queries.biomart_annotations(species, ["external_gene_name", "go_id"])
     return annot
 
-def getGenesFromGO(GOID, annList):
-    if (str(type(GOID)) != "<class 'str'>"):
-        return annList.loc[annList.go_id.isin(GOID),:].external_gene_name.sort_values().to_numpy()
+
+def annSetUp(species: str = "mmusculus") -> pd.DataFrame:
+    """Deprecated: Use ann_set_up instead."""
+    warnings.warn(
+        "annSetUp is deprecated, use ann_set_up instead",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return ann_set_up(species)
+
+
+def get_genes_from_go(go_id, ann_list: pd.DataFrame) -> np.ndarray:
+    """Get genes associated with a GO term.
+
+    Args:
+        go_id: GO term ID (string) or list of GO term IDs.
+        ann_list: DataFrame from ann_set_up with 'external_gene_name' and 'go_id' columns.
+
+    Returns:
+        Array of gene names associated with the GO term(s).
+
+    Example:
+        >>> genes = get_genes_from_go("GO:0006915", annot)
+    """
+    if isinstance(go_id, str):
+        return ann_list.loc[ann_list.go_id == go_id, :].external_gene_name.sort_values().to_numpy()
     else:
-        return annList.loc[annList.go_id==GOID,:].external_gene_name.sort_values().to_numpy()
+        return ann_list.loc[ann_list.go_id.isin(go_id), :].external_gene_name.sort_values().to_numpy()
+
+
+def getGenesFromGO(GOID, annList: pd.DataFrame) -> np.ndarray:
+    """Deprecated: Use get_genes_from_go instead."""
+    warnings.warn(
+        "getGenesFromGO is deprecated, use get_genes_from_go instead",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return get_genes_from_go(GOID, annList)

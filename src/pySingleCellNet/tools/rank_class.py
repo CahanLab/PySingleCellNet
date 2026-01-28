@@ -1,7 +1,7 @@
+import warnings
 import pandas as pd
 import scanpy as sc
 import numpy as np
-import pySingleCellNet as pySCN
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
 from scipy.sparse import issparse
@@ -9,29 +9,80 @@ from scipy.stats import rankdata
 from sklearn.decomposition import FastICA
 from anndata import AnnData
 
-from .utils import *
+from .classifier import _sc_makeClassifier, _rf_classPredict
+from ..utils.misc import find_elbow
 
-def train_rank_classifier(adata, dLevel, nRand: int = 200, n_trees = 1000):
+
+def _compute_mean_expression_per_cluster(adata, cluster_key):
+    """Compute mean gene expression for each cluster (internal use only).
+
+    Args:
+        adata: AnnData object with labeled cell clusters.
+        cluster_key: Key in adata.obs where cluster labels are stored.
     """
-    convert adata to ranked values and pass to sc_makeClassifier, reformat result to make compatible with 
-    scn_classify
+    if cluster_key not in adata.obs.columns:
+        raise ValueError(f"{cluster_key} not found in adata.obs")
+
+    clusters = adata.obs[cluster_key].unique().tolist()
+    mean_expressions = []
+    for cluster in clusters:
+        cluster_cells = adata[adata.obs[cluster_key] == cluster, :]
+        mean_expression = np.mean(cluster_cells.X, axis=0).A1 if issparse(cluster_cells.X) else np.mean(cluster_cells.X, axis=0)
+        mean_expressions.append(mean_expression)
+
+    mean_expression_matrix = np.vstack(mean_expressions)
+    mean_expression_adata = sc.AnnData(X=mean_expression_matrix,
+                                       var=pd.DataFrame(index=adata.var_names),
+                                       obs=pd.DataFrame(index=clusters))
+    adata.uns['mean_expression'] = mean_expression_adata
+
+def train_rank_classifier(
+    adata: AnnData,
+    groupby: str = None,
+    n_rand: int = 200,
+    n_trees: int = 1000,
+    **kwargs
+) -> dict:
+    """Train a rank-based cell type classifier.
+
+    Converts expression data to ranked values and trains a random forest classifier.
+
+    Args:
+        adata: AnnData object with training data.
+        groupby: Column in .obs containing cell type labels.
+        n_rand: Number of random samples to generate. Defaults to 200.
+        n_trees: Number of trees in random forest. Defaults to 1000.
+
+    Returns:
+        Dictionary containing trained classifier.
+
+    Example:
+        >>> clf = train_rank_classifier(adata, groupby='celltype')
     """
-    labels = adata.obs[dLevel].to_list()
+    # Handle deprecated parameter names
+    if 'dLevel' in kwargs:
+        warnings.warn("dLevel is deprecated, use groupby instead", DeprecationWarning, stacklevel=2)
+        groupby = kwargs.pop('dLevel')
+    if 'nRand' in kwargs:
+        warnings.warn("nRand is deprecated, use n_rand instead", DeprecationWarning, stacklevel=2)
+        n_rand = kwargs.pop('nRand')
+
+    labels = adata.obs[groupby].to_list()
     xgenes = adata.var_names.to_list()
 
-    adTrainRank = pySCN.rank_genes_fast2(adata)
+    adTrainRank = rank_genes_fast2(adata)
 
-    stTrain= adTrainRank.obs.copy()
+    stTrain = adTrainRank.obs.copy()
     expTrain = adTrainRank.to_df()
     expTrain = expTrain.loc[stTrain.index.values]
-    
-    clf = pySCN.sc_makeClassifier(expTrain, xgenes, labels, nRand=nRand, ntrees = n_trees)
-    return {'tpGeneArray':  None, 'topPairs':None, 'classifier': clf, 'diffExpGenes':None}
+
+    clf = _sc_makeClassifier(expTrain, xgenes, labels, nRand=n_rand, ntrees=n_trees)
+    return {'tpGeneArray': None, 'topPairs': None, 'classifier': clf, 'diffExpGenes': None}
 
 
 def rank_classify(adata: AnnData, rf_rank, nrand: int = 0, copy=False) -> AnnData:
 
-    adQuery =  pySCN.rank_genes_fast2(adata)
+    adQuery = rank_genes_fast2(adata)
     stQuery = adata.obs.copy()
     expQuery = adQuery.to_df()
     expQuery = expQuery.loc[stQuery.index.values]
@@ -41,9 +92,9 @@ def rank_classify(adata: AnnData, rf_rank, nrand: int = 0, copy=False) -> AnnDat
     clf = rf_rank['classifier']
     feature_names = clf.feature_names_in_
     #### newx = newx.reindex(labels=feature_names, axis='columns', fill_value=0)
-    #### xans = pySCN.rf_classPredict(clf, newx, numRand=nrand)
+    #### xans = _rf_classPredict(clf, newx, numRand=nrand)
     expQuery = expQuery.reindex(labels=feature_names, axis='columns', fill_value=0)
-    xans = pySCN.rf_classPredict(clf, expQuery, numRand=nrand)
+    xans = _rf_classPredict(clf, expQuery, numRand=nrand)
     adata.obsm['SCN_score'] = xans.copy()
     adata.obs['SCN_class'] = xans.idxmax(axis=1)
     return adata if copy else None
@@ -213,26 +264,77 @@ def score_clusters_to_obsm(adx, gene_dict):
 # Usage:
 # scored_adata = score_clusters_to_obsm(adata, signature_lists)
 
+def find_sig_genes(
+    adata,
+    groupby: str,
+    top_n: int = 25,
+    min_fold_change: float = 1,
+    min_in_group_fraction: float = 0.30,
+    max_out_group_fraction: float = 0.20,
+    method: str = 'wilcoxon'
+) -> dict:
+    """Find significant marker genes for each group.
+
+    Performs differential expression analysis and filters results to identify
+    marker genes for each group in the specified groupby column.
+
+    Args:
+        adata: AnnData object containing expression data.
+        groupby: Column name in .obs for grouping cells.
+        top_n: Number of top genes to return per group. Defaults to 25.
+        min_fold_change: Minimum fold change threshold. Defaults to 1.
+        min_in_group_fraction: Minimum fraction of cells in group expressing gene. Defaults to 0.30.
+        max_out_group_fraction: Maximum fraction of cells outside group expressing gene. Defaults to 0.20.
+        method: Statistical test method ('wilcoxon', 't-test', etc.). Defaults to 'wilcoxon'.
+
+    Returns:
+        Dictionary mapping group names to arrays of marker gene names.
+
+    Example:
+        >>> markers = find_sig_genes(adata, groupby='celltype', top_n=50)
+    """
+    adTemp = adata.copy()
+    grps = adata.obs[groupby]
+    groups = np.unique(grps)
+    sc.tl.rank_genes_groups(adTemp, groupby, use_raw=False, method=method)
+    sc.tl.filter_rank_genes_groups(
+        adTemp,
+        min_fold_change=min_fold_change,
+        min_in_group_fraction=min_in_group_fraction,
+        max_out_group_fraction=max_out_group_fraction
+    )
+    tempTab = pd.DataFrame(adTemp.uns['rank_genes_groups_filtered']['names']).head(top_n)
+    cgenes = {}
+    for g in groups:
+        temp = tempTab[g]
+        cgenes[g] = temp.to_numpy()
+    return cgenes
+
+
 def findSigGenes(
     adDat,
     dLevel,
-    topX = 25,
-    min_fold_change = 1,
-    min_in_group_fraction = 0.30,
-    max_out_group_fraction = 0.20,
+    topX=25,
+    min_fold_change=1,
+    min_in_group_fraction=0.30,
+    max_out_group_fraction=0.20,
     method='wilcoxon'
 ):
-    adTemp = adDat.copy()
-    grps = adDat.obs[dLevel]
-    groups = np.unique(grps)
-    sc.tl.rank_genes_groups(adTemp, dLevel, use_raw=False, method=method)
-    sc.tl.filter_rank_genes_groups(adTemp, min_fold_change=min_fold_change, min_in_group_fraction=min_in_group_fraction, max_out_group_fraction=max_out_group_fraction)
-    tempTab = pd.DataFrame(adTemp.uns['rank_genes_groups_filtered']['names']).head(topX)
-    cgenes = {}
-    for g in groups:
-        temp = tempTab[g] 
-        cgenes[g] = temp.to_numpy()
-    return cgenes
+    """Deprecated: Use find_sig_genes instead."""
+    warnings.warn(
+        "findSigGenes is deprecated, use find_sig_genes instead",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return find_sig_genes(
+        adata=adDat,
+        groupby=dLevel,
+        top_n=topX,
+        min_fold_change=min_fold_change,
+        min_in_group_fraction=min_in_group_fraction,
+        max_out_group_fraction=max_out_group_fraction,
+        method=method
+    )
 
 
 """
@@ -278,7 +380,7 @@ def find_knn_modules(
         adtemp = adOps.copy()
         if dLevel not in adtemp.obs.columns:
             raise ValueError(dLevel + " not in obs.")
-        compute_mean_expression_per_cluster(adtemp, dLevel)
+        _compute_mean_expression_per_cluster(adtemp, dLevel)
         adOps = adtemp.uns['mean_expression'].copy()        
     adata_T = adOps.T
     sc.tl.pca(adata_T)
@@ -290,7 +392,7 @@ def find_knn_modules(
     clusters = adf.groupby('leiden', observed=True).apply(lambda x: x.index.tolist()).to_dict()
     clusters = {prefix + k: v for k, v in clusters.items()}
     adata.uns['knn_modules'] = clusters
-    pySCN.score_gene_modules(adata, method='knn')
+    score_gene_modules(adata, method='knn')
 
 
 def score_gene_modules(

@@ -9,9 +9,6 @@ from scipy.sparse import csr_matrix
 import warnings
 import matplotlib.pyplot as plt
 from alive_progress import alive_bar
-#from ..utils import *
-#from .tsp_rf import *
-#from .scn_assess import create_classifier_report
 from ..utils import build_knn_graph, get_unique_colors, split_adata_indices
 from sklearn.metrics import classification_report
 from pySingleCellNet.config import SCN_DIFFEXP_KEY, SCN_CATEGORY_COLOR_DICT
@@ -500,70 +497,108 @@ def _rf_classPredict(rfObj,expQuery,numRand=50):
     return xpreds
 
 
-# assumses that the data are normalized, and HVG defined
-def train_classifier(aTrain,
-    dLevel,
-    nRand = None,
-    cell_type_to_color = None,
-    nTopGenes = 30,
-    nTopGenePairs = 40,
-    nTrees = 1000,
-    propOther=0.5,
-    layer = None,
-    n_comps = 50
-#   assumes that .var['highly_variable'] is set
-#   assumes that log lib size scaled normalization has been performed (but not gene scaling)
-):
+def train_classifier(
+    adata: AnnData = None,
+    groupby: str = None,
+    n_rand: int = None,
+    cell_type_to_color: dict = None,
+    n_top_genes: int = 30,
+    n_top_gene_pairs: int = 40,
+    n_trees: int = 1000,
+    prop_other: float = 0.5,
+    layer: str = None,
+    n_comps: int = 50,
+    **kwargs
+) -> dict:
+    """Train a cell type classifier on labeled single-cell data.
+
+    Trains a random forest classifier using gene pair features to classify
+    cells by type. Assumes data is normalized and highly variable genes are defined.
+
+    Args:
+        adata: AnnData object with training data. Must have .var['highly_variable'] set.
+        groupby: Column in .obs containing cell type labels.
+        n_rand: Number of random samples to generate. Defaults to mean cells per type.
+        cell_type_to_color: Optional dict mapping cell types to colors.
+        n_top_genes: Number of top genes per differential type. Defaults to 30.
+        n_top_gene_pairs: Number of top gene pairs to use. Defaults to 40.
+        n_trees: Number of trees in random forest. Defaults to 1000.
+        prop_other: Proportion of pairs from other cell types. Defaults to 0.5.
+        layer: Layer to use for expression values. Defaults to None (uses .X).
+        n_comps: Number of PCA components. Defaults to 50.
+
+    Returns:
+        Dictionary containing trained classifier and associated metadata.
+
+    Example:
+        >>> clf = train_classifier(adata, groupby='celltype', n_top_genes=50)
+    """
+    # Handle deprecated parameter names
+    if 'aTrain' in kwargs:
+        warnings.warn("aTrain is deprecated, use adata instead", DeprecationWarning, stacklevel=2)
+        adata = kwargs.pop('aTrain')
+    if 'dLevel' in kwargs:
+        warnings.warn("dLevel is deprecated, use groupby instead", DeprecationWarning, stacklevel=2)
+        groupby = kwargs.pop('dLevel')
+    if 'nRand' in kwargs:
+        warnings.warn("nRand is deprecated, use n_rand instead", DeprecationWarning, stacklevel=2)
+        n_rand = kwargs.pop('nRand')
+    if 'nTopGenes' in kwargs:
+        warnings.warn("nTopGenes is deprecated, use n_top_genes instead", DeprecationWarning, stacklevel=2)
+        n_top_genes = kwargs.pop('nTopGenes')
+    if 'nTopGenePairs' in kwargs:
+        warnings.warn("nTopGenePairs is deprecated, use n_top_gene_pairs instead", DeprecationWarning, stacklevel=2)
+        n_top_gene_pairs = kwargs.pop('nTopGenePairs')
+    if 'nTrees' in kwargs:
+        warnings.warn("nTrees is deprecated, use n_trees instead", DeprecationWarning, stacklevel=2)
+        n_trees = kwargs.pop('nTrees')
+    if 'propOther' in kwargs:
+        warnings.warn("propOther is deprecated, use prop_other instead", DeprecationWarning, stacklevel=2)
+        prop_other = kwargs.pop('propOther')
+
     progress_total = 5
     with alive_bar(progress_total, title="Training classifier") as bar:
         warnings.filterwarnings('ignore')
 
-        # auto determine nRand = mean number of cells per type
-        if nRand is None:
-            nRand = np.floor(np.mean(aTrain.obs[dLevel].value_counts()))
+        # auto determine n_rand = mean number of cells per type
+        if n_rand is None:
+            n_rand = np.floor(np.mean(adata.obs[groupby].value_counts()))
 
-        n_comps = n_comps if 0 < n_comps < min(aTrain.shape) else min(aTrain.shape) - 1
+        n_comps = n_comps if 0 < n_comps < min(adata.shape) else min(adata.shape) - 1
 
-        stTrain= aTrain.obs
-        expRaw = aTrain.to_df()
+        stTrain = adata.obs
+        expRaw = adata.to_df()
         expRaw = expRaw.loc[stTrain.index.values]
-        adNorm = aTrain.copy()
+        adNorm = adata.copy()
         # cluster for comparison to closest celltype neighbors
 
         sc.pp.pca(adNorm, n_comps=n_comps, mask_var='highly_variable')
-        sc.tl.dendrogram(adNorm, groupby=dLevel, linkage_method='average', use_rep = 'X_pca', n_pcs = n_comps) # note that res here might not be what the user intends
-        sc.tl.rank_genes_groups(adNorm, use_raw=False, layer=layer, groupby=dLevel, mask_var='highly_variable', key_added=SCN_DIFFEXP_KEY, pts=True)
+        sc.tl.dendrogram(adNorm, groupby=groupby, linkage_method='average', use_rep='X_pca', n_pcs=n_comps)
+        sc.tl.rank_genes_groups(adNorm, use_raw=False, layer=layer, groupby=groupby, mask_var='highly_variable', key_added=SCN_DIFFEXP_KEY, pts=True)
 
         expTnorm = adNorm.to_df()
         expTnorm = expTnorm.loc[stTrain.index.values]
-        bar() # Bar 1
-        # cgenesA, grps, cgenes_list = get_classy_genes(adNorm, dLevel = dLevel, key_name = SCN_DIFFEXP_KEY, topX = nTopGenes)
-        # cgenesA, grps, cgenes_list = get_classy_genes_2(adNorm, groupby= dLevel, key_name = SCN_DIFFEXP_KEY, topX_per_diff_type = nTopGenes, layer = layer)
-        topX_per_diff_type = np.ceil(nTopGenes/3)
-        cgenesA, grps, cgenes_list = _get_classy_genes_3(adNorm, groupby= dLevel, key_name = SCN_DIFFEXP_KEY, topX_per_diff_type = topX_per_diff_type, layer = layer)
-        bar() # Bar 2
-        ## xpairs = ptGetTop(expTnorm.loc[:,cgenesA], grps, cgenes_list, topX=nTopGenePairs, sliceSize=5000, propOther=propOther)
-        xpairs = _generate_gene_pairs(cgenes_list, npairs = nTopGenePairs )
-        bar() # Bar 3
-        pdTrain = _query_transform(expRaw.loc[:,cgenesA], xpairs)
+        bar()  # Bar 1
+        topX_per_diff_type = np.ceil(n_top_genes / 3)
+        cgenesA, grps, cgenes_list = _get_classy_genes_3(adNorm, groupby=groupby, key_name=SCN_DIFFEXP_KEY, topX_per_diff_type=topX_per_diff_type, layer=layer)
+        bar()  # Bar 2
+        xpairs = _generate_gene_pairs(cgenes_list, npairs=n_top_gene_pairs)
+        bar()  # Bar 3
+        pdTrain = _query_transform(expRaw.loc[:, cgenesA], xpairs)
 
-        tspRF = _sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand = nRand, ntrees = nTrees)
-        bar() # Bar 4
-    
-        ## set celltype colors
-        ## Do this here because we add a 'rand' celltype
-        
-        # Need to add checks that all classes have a color if ct_colors is provided
+        tspRF = _sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand=n_rand, ntrees=n_trees)
+        bar()  # Bar 4
+
+        # set celltype colors - add 'rand' celltype
         if cell_type_to_color is None:
-            ## assume this is a Series
-            cell_types = stTrain[dLevel].cat.categories.to_list()
+            cell_types = stTrain[groupby].cat.categories.to_list()
             cell_types.append('rand')
             unique_colors = get_unique_colors(len(cell_types))
             cell_type_to_color = {cell_type: color for cell_type, color in zip(cell_types, unique_colors)}
             cell_type_to_color['rand'] = np.array(SCN_CATEGORY_COLOR_DICT['Rand'])
-        bar() # Bar 5
+        bar()  # Bar 5
 
-        argList = {'nRand': nRand, 'nTopGenes': nTopGenes, 'nTopGenePairs': nTopGenePairs, 'nTrees': nTrees, 'propOther': propOther}
+        argList = {'n_rand': n_rand, 'n_top_genes': n_top_genes, 'n_top_gene_pairs': n_top_gene_pairs, 'n_trees': n_trees, 'prop_other': prop_other}
 
     return {'tpGeneArray': cgenesA, 'topPairs':xpairs, 'classifier': tspRF, 'diffExpGenes':cgenes_list, 'ctColors':cell_type_to_color, 'argList': argList}
 
@@ -724,35 +759,6 @@ def _generate_gene_pairs(
     # Convert to a NumPy array of unique values
     return np.unique(all_pairs)
 
-# deprecated 
-def train_and_assess(
-    adata,
-    groupby,
-    ncells = 250,
-    nTopGenes = 30,
-    nTopGenePairs = 40,
-    nTrees = 1000,
-    propOther = 0.25,
-    obs_pred = 'SCN_class_argmax',
-    return_clf = False,
-    layer = None,
-    strata_col = 'stage',
-    n_comps = 50
-):
-    nRand = ncells
-    tids, vids = split_adata_indices(adata, ncells, groupby=groupby, cellid=None, strata_col=strata_col)
-    adTrain = adata[tids].copy()
-    # train
-    clf = train_classifier(adTrain, dLevel = groupby, nTopGenes = nTopGenes, nTopGenePairs = nTopGenePairs, nRand = nRand, nTrees = nTrees, layer=layer, propOther=propOther, n_comps = n_comps)
-    # assess
-    adHeldOut = adata[vids].copy()
-    # scn_classify(adHeldOut, clf, nrand = 0)
-    classify_anndata(adHeldOut, clf, nrand = 0)
-    c_report = create_classifier_report(adHeldOut, ground_truth=groupby, prediction=obs_pred)
-    if return_clf:
-        return c_report, clf
-    else:
-        return c_report
 
 
 
