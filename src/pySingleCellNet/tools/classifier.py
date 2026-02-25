@@ -432,22 +432,16 @@ def _sc_makeClassifier(
     return clf
 
 def classify_anndata(adata: AnnData, rf_tsp, nrand: int = 0):
-    """
-    Classifies cells in the `adata` object based on the given gene expression and cross-pair information using a
+    """Classifies cells in the `adata` object based on the given gene expression and cross-pair information using a
     random forest classifier in rf_tsp trained with the provided xpairs genes.
-    
-    Parameters:
-    -----------
-    adata: `AnnData`
-        An annotated data matrix containing the gene expression information for cells.
-    rf_tsp: List[float]
-        A list of random forest classifier parameters used for classification.
-    nrand: int
-        Number of random permutations for the null distribution. Default is 0.
-    
+
+    Args:
+        adata: An annotated data matrix containing the gene expression information for cells.
+        rf_tsp: A list of random forest classifier parameters used for classification.
+        nrand: Number of random permutations for the null distribution. Default is 0.
+
     Returns:
-    --------
-    Updates adata with classification results 
+        Updates adata with classification results.
     """
 
     # Classify cells using the `_scn_predict` function
@@ -562,7 +556,7 @@ def train_classifier(
 
         # auto determine n_rand = mean number of cells per type
         if n_rand is None:
-            n_rand = np.floor(np.mean(adata.obs[groupby].value_counts()))
+            n_rand = int(np.floor(np.mean(adata.obs[groupby].value_counts())))
 
         n_comps = n_comps if 0 < n_comps < min(adata.shape) else min(adata.shape) - 1
 
@@ -604,17 +598,16 @@ def train_classifier(
 
 
 def compute_celltype_proportions(adata, celltype_col='celltype', stage_col='stage', exclude=None):
-    """
-    Compute the proportion of cell types per stage in the provided AnnData object.
+    """Compute the proportion of cell types per stage in the provided AnnData object.
 
-    Parameters:
-        adata (AnnData): The AnnData object containing scRNA-seq data.
-        celltype_col (str): The name of the .obs column containing cell type information. Default is 'celltype'.
-        stage_col (str): The name of the .obs column containing stage information. Default is 'stage'.
-        exclude (list or None): A list of cell types to exclude from the calculation. Default is None.
+    Args:
+        adata: The AnnData object containing scRNA-seq data.
+        celltype_col: The name of the .obs column containing cell type information. Default is 'celltype'.
+        stage_col: The name of the .obs column containing stage information. Default is 'stage'.
+        exclude: A list of cell types to exclude from the calculation. Default is None.
 
     Returns:
-        pd.DataFrame: A DataFrame with stages as rows, cell types as columns, and proportions as values.
+        A DataFrame with stages as rows, cell types as columns, and proportions as values.
     """
     # Filter out excluded cell types if any
     if exclude:
@@ -630,17 +623,16 @@ def compute_celltype_proportions(adata, celltype_col='celltype', stage_col='stag
 
 
 def correlate_proportions(reference_proportions, query_adata, celltype_col='SCN_class'):
-    """
-    Compute the correlation between cell type proportions in the query AnnData object and
+    """Compute the correlation between cell type proportions in the query AnnData object and
     the reference proportions for each stage.
 
-    Parameters:
-        reference_proportions (pd.DataFrame): The output of the compute_celltype_proportions function, representing the reference proportions.
-        query_adata (AnnData): The AnnData object to compute proportions on for correlation analysis.
-        celltype_col (str): The name of the .obs column containing cell type information in the query AnnData object. Default is 'SCN_class'.
+    Args:
+        reference_proportions: The output of the compute_celltype_proportions function, representing the reference proportions.
+        query_adata: The AnnData object to compute proportions on for correlation analysis.
+        celltype_col: The name of the .obs column containing cell type information in the query AnnData object. Default is 'SCN_class'.
 
     Returns:
-        pd.Series: Correlations between the query proportions and each stage in the reference proportions.
+        Correlations between the query proportions and each stage in the reference proportions.
     """
     # Compute the cell type proportions in the query data
     query_counts = query_adata.obs[celltype_col].value_counts(normalize=True)

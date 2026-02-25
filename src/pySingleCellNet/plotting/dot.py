@@ -16,16 +16,14 @@ from typing import Optional, Callable
 from ..utils import *
 
 def umi_counts_ranked(adata, total_counts_column="total_counts"):
-    """
-    Identifies and plors the knee point of the UMI count distribution in an AnnData object.
+    """Identify and plot the knee point of the UMI count distribution in an AnnData object.
 
-    Parameters:
+    Args:
         adata (AnnData): The input AnnData object.
-        total_counts_column (str): Column in `adata.obs` containing total UMI counts. Default is "total_counts".
-        show (bool): If True, displays a log-log plot with the knee point. Default is True.
+        total_counts_column (str): Column in `adata.obs` containing total UMI counts. Defaults to "total_counts".
 
     Returns:
-        float: The UMI count value at the knee point.
+        None: Displays a log-log plot with the knee point.
     """
     # Extract total UMI counts
     umi_counts = adata.obs[total_counts_column]
@@ -61,7 +59,19 @@ def umi_counts_ranked(adata, total_counts_column="total_counts"):
     plt.show()
     
 
-def rela_graph(gra, color_dict): 
+def rela_graph(gra, color_dict):
+    """Plot a PAGA-derived relationship graph with colored vertices.
+
+    Renders an igraph graph using the Fruchterman-Reingold layout with vertex colors
+    from the provided color dictionary and vertex sizes scaled by cell count.
+
+    Args:
+        gra (igraph.Graph): An igraph Graph object with vertex attributes 'name' and 'ncells'.
+        color_dict (dict): Dictionary mapping vertex names to RGB color tuples.
+
+    Returns:
+        None: Displays the graph plot.
+    """
     ig.config['plotting.backend'] = 'matplotlib'
     v_style = {}
     v_style["layout"] = "fruchterman_reingold"
@@ -85,7 +95,19 @@ def rela_graph(gra, color_dict):
 
 
 
-def ontogeny_graph(gra, color_dict): 
+def ontogeny_graph(gra, color_dict):
+    """Plot an ontogeny relationship graph with colored vertices.
+
+    Renders an igraph graph using the Fruchterman-Reingold layout with vertex colors
+    from the provided color dictionary and vertex sizes scaled by cell count.
+
+    Args:
+        gra (igraph.Graph): An igraph Graph object with vertex attributes 'name' and 'ncells'.
+        color_dict (dict): Dictionary mapping vertex names to RGB color tuples.
+
+    Returns:
+        None: Displays the graph plot.
+    """
     ig.config['plotting.backend'] = 'matplotlib'
     v_style = {}
     v_style["layout"] = "fruchterman_reingold"
@@ -120,7 +142,26 @@ def dotplot_diff_gene(
     celltype_names: list = [],
     order_by = 'scores'
 ):
+    """Create a DotPlot of differentially expressed genes across cell type/category combinations.
 
+    Builds a combined 'ct_by_cat' grouping from cell type and category columns, selects
+    top differentially expressed genes per group from the provided dictionary, and renders
+    a scanpy DotPlot with swapped axes.
+
+    Args:
+        adata (AnnData): An AnnData object with SCN classification results.
+        diff_gene_dict (dict): Dictionary containing 'geneTab_dict' (mapping cell types to
+            gene tables) and 'category_names' (list of category names).
+        num_genes (int, optional): Number of top genes to display per group. Defaults to 10.
+        celltype_groupby (str, optional): Column in `.obs` for cell type grouping. Defaults to "SCN_class".
+        category_groupby (str, optional): Column in `.obs` for category grouping. Defaults to "SCN_class_type".
+        category_names (list[str], optional): Category names to include. Defaults to ["None", "Singular"].
+        celltype_names (list, optional): Subset of cell types to include. Defaults to [] (all in diff_gene_dict).
+        order_by (str, optional): Column name to order genes by in the gene tables. Defaults to 'scores'.
+
+    Returns:
+        sc.pl.DotPlot: A scanpy DotPlot object (call .show() or .render() to display).
+    """
     # remove celltypes unspecified in diff_gene_dict
     dd_dict = diff_gene_dict['geneTab_dict']
     tokeep = list(dd_dict.keys())
@@ -166,7 +207,21 @@ def dotplot_scn_scores(
     groupby: str,
     expression_cutoff = 0.1,
     obsm_name = 'SCN_score'
-):    
+):
+    """Create a dot plot of SCN classification scores grouped by a specified column.
+
+    Constructs a temporary AnnData from the SCN score matrix and renders a scanpy
+    dot plot colored by score intensity.
+
+    Args:
+        adata (AnnData): An AnnData object with SCN scores stored in `.obsm`.
+        groupby (str): Column name in `.obs` to group cells by.
+        expression_cutoff (float, optional): Minimum score threshold for dot display. Defaults to 0.1.
+        obsm_name (str, optional): Key in `.obsm` containing the SCN score matrix. Defaults to 'SCN_score'.
+
+    Returns:
+        None: Displays the dot plot.
+    """
     adTemp = AnnData(adata.obsm[obsm_name], obs=adata.obs)
     adTemp.obs[groupby] = adata.obs[groupby]
     sc.pl.dotplot(adTemp, adTemp.var_names.values, groupby=groupby, expression_cutoff=expression_cutoff, cmap=Batlow_20.mpl_colormap, colorbar_title="SCN score")

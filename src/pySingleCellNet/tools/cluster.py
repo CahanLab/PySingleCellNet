@@ -297,37 +297,37 @@ def cluster_subclusters(
     leiden_resolution: float = 0.25,
     subcluster_col_name: str = 'subcluster'
 ) -> None:
-    """
-    Subcluster selected clusters (or all clusters) within an AnnData object by recomputing HVGs, PCA,
-    kNN graph, and Leiden clustering. Updates the AnnData object in-place, adding or updating
-    the `subcluster_col_name` column in `.obs` with new labels prefixed by the original cluster.
+    """Subcluster selected clusters within an AnnData object.
 
-    Cells in clusters not listed in `to_subcluster` retain their original cluster label as their "subcluster".
+    Recomputes HVGs, PCA, kNN graph, and Leiden clustering for each selected
+    cluster. Updates the AnnData object in-place, adding or updating the
+    ``subcluster_col_name`` column in ``.obs`` with new labels prefixed by the
+    original cluster. Cells in clusters not listed in ``to_subcluster`` retain
+    their original cluster label.
 
     Args:
-        adata: AnnData
-            The AnnData object containing precomputed clusters in `.obs[cluster_column]`.
-        cluster_column: str, optional
-            Name of the `.obs` column holding the original cluster assignments. Default is 'leiden'.
-        to_subcluster: list of str, optional
-            List of cluster labels (as strings) to subcluster. If `None`, subclusters *all* clusters.
-        layer: 
-            Layer name in `adata.layers` to use for HVG detection. Default is None (and so uses .X)
-        n_hvg: int, optional
-            Number of highly variable genes to select per cluster. Default is 2000.
-        n_pcs: int, optional
-            Number of principal components to compute. Default is 40.
-        n_neighbors: int, optional
-            Number of neighbors for the kNN graph. Default is 10.
-        leiden_resolution: float, optional
-            Resolution parameter for Leiden clustering. Default is 0.25.
-        subcluster_col_name: str, optional
-            Name of the `.obs` column to store subcluster labels. Default is 'subcluster'.
+        adata: AnnData object containing precomputed clusters in ``.obs[cluster_column]``.
+        cluster_column: Name of the ``.obs`` column holding cluster assignments.
+            Defaults to ``'leiden'``.
+        to_subcluster: Cluster labels to subcluster. If ``None``, subclusters all clusters.
+        layer: Layer in ``adata.layers`` to use for HVG detection. Defaults to ``None``.
+        n_hvg: Number of highly variable genes to select per cluster. Defaults to 2000.
+        n_pcs: Number of principal components to compute. Defaults to 40.
+        n_neighbors: Number of neighbors for the kNN graph. Defaults to 10.
+        leiden_resolution: Resolution parameter for Leiden clustering. Defaults to 0.25.
+        subcluster_col_name: Name of the ``.obs`` column to store subcluster labels.
+            Defaults to ``'subcluster'``.
+
+    Returns:
+        None. Modifies ``adata`` in-place by adding columns to ``.obs``:
+            - ``subcluster_col_name``: subcluster labels (original cluster prefix + Leiden index).
+            - ``'original_cluster'``: copy of the original cluster assignments as strings.
 
     Raises:
-        ValueError: If `cluster_column` not in `adata.obs`.
-        ValueError: If `layer` not in `adata.layers`.
-        ValueError: If any entry in `to_subcluster` is not found in `adata.obs[cluster_column]`.
+        ValueError: If ``cluster_column`` not in ``adata.obs``.
+        ValueError: If ``layer`` not in ``adata.layers``.
+        ValueError: If any entry in ``to_subcluster`` is not found in
+            ``adata.obs[cluster_column]``.
     """
     # Error checking
     if cluster_column not in adata.obs:

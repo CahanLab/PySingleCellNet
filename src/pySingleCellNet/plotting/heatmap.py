@@ -37,14 +37,30 @@ def heatmap_clustering_eval(
     render: bool = True,
     set_default_font: bool = True,     # avoids 'pc/k/res' being misread as font family
 ):
-    """
-    Marsilea heatmap to guide clustering parameter selection.
+    """Plot a Marsilea heatmap to guide clustering parameter selection.
 
-    Left:   textual columns for parsed parameters (pc, k, res)
-    Center: eval heatmap with raw numbers printed in cells (includes n_clusters as first column)
-    Right:  bar = unique_strict_genes + unique_naive_genes; rows sorted descending by this score
+    Displays parsed parameters (pc, k, res) on the left, an evaluation heatmap
+    with raw numbers in cells at center, and a bar chart of combined unique gene
+    counts on the right. Rows are sorted by descending selection score.
 
-    Row names (index strings) are NOT shown.
+    Args:
+        df (pd.DataFrame): DataFrame containing clustering evaluation metrics.
+        index_col (str, optional): Column name used as row identifier. Defaults to "label_col".
+        metrics (tuple, optional): Column names to display in the heatmap.
+            Defaults to ("n_clusters", "unique_strict_genes", "unique_naive_genes", "frac_pairs_with_at_least_n_strict").
+        bar_sum_cols (tuple, optional): Columns to sum for the right-side bar chart.
+            Defaults to ("unique_strict_genes", "unique_naive_genes").
+        cmap_eval (str, optional): Colormap for the evaluation heatmap. Defaults to "viridis".
+        scale_eval (str, optional): Scaling method for heatmap coloring: 'zscore', 'minmax', or 'none'. Defaults to "zscore".
+        linewidth (float, optional): Line width between heatmap cells. Defaults to 0.5.
+        value_fmt (dict or None, optional): Format strings per metric column for cell text. Defaults to None (auto-detected).
+        title (str, optional): Title for the heatmap. Defaults to "Clustering parameter sweep (select best rows)".
+        render (bool, optional): Whether to render the plot immediately. Defaults to True.
+        set_default_font (bool, optional): Whether to set a default font to avoid font-family warnings. Defaults to True.
+
+    Returns:
+        dict: Dictionary with keys 'canvas' (Marsilea heatmap object), 'row_order' (list),
+            'score' (pd.Series), and 'params' (pd.DataFrame of parsed pc/k/res values).
     """
 
     # Optional: force a sane default font to avoid font-family warnings
@@ -193,7 +209,21 @@ def heatmap_clustering_eval(
 def heatmap_classifier_report(df: pd.DataFrame,
     width=2.5,
     height=7):
+    """Plot a heatmap of classifier precision, recall, and F1-score with support bar chart.
 
+    Renders a Marsilea heatmap from a classification report DataFrame, separating
+    per-class rows from aggregate average rows, and displaying a support count
+    bar chart on the right.
+
+    Args:
+        df (pd.DataFrame): Classification report DataFrame with columns 'Label',
+            'Precision', 'Recall', 'F1-Score', and 'Support'.
+        width (float, optional): Width of the heatmap in inches. Defaults to 2.5.
+        height (float, optional): Height of the heatmap in inches. Defaults to 7.
+
+    Returns:
+        None: Renders the heatmap inline.
+    """
     # Separate the special averages from the rest of the labels
     special_averages = df[df['Label'].isin(['micro avg', 'macro avg', 'weighted avg'])]
     non_avg_df = df[~df['Label'].isin(['micro avg', 'macro avg', 'weighted avg'])]
@@ -375,7 +405,27 @@ def heatmap_gsea_middle(
     col_cluster=False,
     row_cluster=False,
 ):
-    
+    """Generate a GSEA heatmap with the colorbar positioned at the left middle.
+
+    Similar to `heatmap_gsea` but places the colorbar vertically on the left side
+    and uses tight_layout for better spacing.
+
+    Args:
+        gmat (pd.DataFrame): Matrix of GSEA scores (gene sets x samples).
+        clean_signatures (bool, optional): Remove gene sets with all-zero scores. Defaults to False.
+        clean_cells (bool, optional): Remove samples with all-zero scores. Defaults to False.
+        column_colors (pd.Series or pd.DataFrame, optional): Colors to annotate columns. Defaults to None.
+        figsize (tuple, optional): Figure size in inches (width, height). Defaults to (8, 6).
+        label_font_size (int, optional): Font size for axis and colorbar labels. Defaults to 7.
+        cbar_pos (list, optional): Position of the colorbar [left, bottom, width, height]. Defaults to [0.07, .3, .02, .4].
+        dendro_ratio (tuple, optional): Proportion allocated to row and column dendrograms. Defaults to (0.3, 0.1).
+        cbar_title (str, optional): Title of the colorbar. Defaults to 'NES'.
+        col_cluster (bool, optional): Whether to cluster columns. Defaults to False.
+        row_cluster (bool, optional): Whether to cluster rows. Defaults to False.
+
+    Returns:
+        None: Displays the heatmap.
+    """
     gsea_matrix = gmat.copy()
     if clean_cells:
         gsea_matrix = gsea_matrix.loc[:,gsea_matrix.sum(0) != 0]
@@ -423,9 +473,27 @@ def heatmap_gsea_old(
     label_font_size = 7,
     cbar_pos = [0.07, .3, .02, .4],
     dendro_ratio = (0.3, 0.1),
-    cbar_title='NES' 
+    cbar_title='NES'
 ):
-    
+    """Generate a GSEA heatmap with row clustering enabled by default.
+
+    Legacy version of the GSEA heatmap that always clusters rows and places
+    the colorbar on the left side.
+
+    Args:
+        gmat (pd.DataFrame): Matrix of GSEA scores (gene sets x samples).
+        clean_signatures (bool, optional): Remove gene sets with all-zero scores. Defaults to False.
+        clean_cells (bool, optional): Remove samples with all-zero scores. Defaults to False.
+        column_colors (pd.Series or pd.DataFrame, optional): Colors to annotate columns. Defaults to None.
+        figsize (tuple, optional): Figure size in inches (width, height). Defaults to (8, 6).
+        label_font_size (int, optional): Font size for axis and colorbar labels. Defaults to 7.
+        cbar_pos (list, optional): Position of the colorbar [left, bottom, width, height]. Defaults to [0.07, .3, .02, .4].
+        dendro_ratio (tuple, optional): Proportion allocated to row and column dendrograms. Defaults to (0.3, 0.1).
+        cbar_title (str, optional): Title of the colorbar. Defaults to 'NES'.
+
+    Returns:
+        None: Displays the heatmap.
+    """
     gsea_matrix = gmat.copy()
     if clean_cells:
         gsea_matrix = gsea_matrix.loc[:,gsea_matrix.sum(0) != 0]
@@ -468,6 +536,29 @@ def heatmap_gsea_old(
 
 
 def heatmap_genes(adQuery, adTrain=None, cgenes_list={}, list_of_types_toshow=[], list_of_training_to_show=[], number_of_genes_toshow=3, query_annotation_togroup='SCN_class', training_annotation_togroup='SCN_class', split_show=False, save = False):
+    """Plot a heatmap of top classifier genes for selected cell types across query and training data.
+
+    Constructs a combined expression matrix from query (and optionally training) cells
+    for specified cell types, selects top genes per type from a ranked gene list, and
+    renders a scanpy heatmap grouped by cell annotation.
+
+    Args:
+        adQuery (AnnData): Query AnnData object with SCN classification results.
+        adTrain (AnnData, optional): Training AnnData object. Required if any entry
+            in list_of_training_to_show is True. Defaults to None.
+        cgenes_list (dict, optional): Dictionary mapping cell type names to ranked gene lists. Defaults to {}.
+        list_of_types_toshow (list, optional): Cell types to include in the heatmap. Defaults to [] (all SCN_class types).
+        list_of_training_to_show (list[bool], optional): Boolean list indicating whether to include
+            training cells for each corresponding cell type. Defaults to [] (all False).
+        number_of_genes_toshow (int, optional): Number of top genes to display per cell type. Defaults to 3.
+        query_annotation_togroup (str, optional): Column in adQuery.obs to group cells by. Defaults to 'SCN_class'.
+        training_annotation_togroup (str, optional): Column in adTrain.obs to group cells by. Defaults to 'SCN_class'.
+        split_show (bool, optional): Whether to append '_Query' or '_Train' suffix to annotations. Defaults to False.
+        save (bool, optional): Whether to save the heatmap figure. Defaults to False.
+
+    Returns:
+        The result of sc.pl.heatmap (figure or None depending on scanpy version).
+    """
     if list_of_types_toshow.__len__() == list_of_training_to_show.__len__():
         if list_of_types_toshow.__len__() == 0:
             list_of_types_toshow = np.unique(adQuery.obs['SCN_class'])

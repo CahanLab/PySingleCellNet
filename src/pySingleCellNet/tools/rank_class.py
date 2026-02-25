@@ -81,7 +81,18 @@ def train_rank_classifier(
 
 
 def rank_classify(adata: AnnData, rf_rank, nrand: int = 0, copy=False) -> AnnData:
+    """Classify cells using a trained rank-based classifier.
 
+    Args:
+        adata: AnnData object containing query expression data.
+        rf_rank: Dictionary returned by train_rank_classifier containing the trained classifier.
+        nrand: Number of random profiles to add during prediction. Defaults to 0.
+        copy: Whether to return a copy of the AnnData object. Defaults to False.
+
+    Returns:
+        AnnData object with classification scores in .obsm['SCN_score'] and predicted
+        labels in .obs['SCN_class'], or None if copy is False.
+    """
     adQuery = rank_genes_fast2(adata)
     stQuery = adata.obs.copy()
     expQuery = adQuery.to_df()
@@ -101,24 +112,28 @@ def rank_classify(adata: AnnData, rf_rank, nrand: int = 0, copy=False) -> AnnDat
 
 
 def rank_dense_submatrix(submatrix):
+    """Rank gene expression values within each cell of a dense matrix.
+
+    Args:
+        submatrix: Dense numpy array where rows are cells and columns are genes.
+
+    Returns:
+        numpy.ndarray with expression values replaced by their average ranks (descending),
+        zero-indexed.
+    """
     # Operate on a dense submatrix to get the ranks
     # return np.apply_along_axis(lambda x: np.argsort(np.argsort(x)), 1, submatrix)
     return np.apply_along_axis(lambda x: rankdata(-x, method='average') - 1, 1, submatrix)
 
 def rank_genes_fast2(adOrig):
-    """
-    Efficiently replace each gene's expression value with its rank for each cell such that the highest values get the highest ranks
-    genes that are not detected are assigned rank of 0
-    ties are resolved by averaging
-    Parameters:
-    -----------
-    adata : AnnData
-        The annotated data matrix.
+    """Rank gene expression per cell, assigning 0 to undetected genes and averaging ties.
+
+    Args:
+        adOrig: AnnData object containing the expression matrix.
 
     Returns:
-    --------
-    AnnData
-        an AnnData object with ranked expression values as described above
+        AnnData object with expression values replaced by ranks, where the highest
+        expression gets the highest rank and undetected genes are set to 0.
     """
     adata = adOrig.copy()
     # Check if matrix is sparse and get total number of rows
@@ -139,15 +154,14 @@ def rank_genes_fast2(adOrig):
     
 
 def zero_out_b_where_a_is_zero(a, b):
-    """
-    Set entries in matrix `b` to 0 where the corresponding entries in matrix `a` are 0.
-    
-    Parameters:
-    a (csr_matrix or np.ndarray): Sparse matrix `a`.
-    b (csr_matrix or np.ndarray): Sparse matrix `b`, which will be modified in-place.
-    
+    """Set entries in matrix b to 0 wherever the corresponding entries in matrix a are 0.
+
+    Args:
+        a: Sparse (csr_matrix) or dense (np.ndarray) matrix used as the zero mask.
+        b: Sparse (csr_matrix) or dense (np.ndarray) matrix to be modified.
+
     Returns:
-    csr_matrix: Modified sparse matrix `b`.
+        csr_matrix with entries from b zeroed out where a is zero.
     """
     # Convert to csr_matrix if necessary
     if not sp.isspmatrix_csr(a):
@@ -163,18 +177,13 @@ def zero_out_b_where_a_is_zero(a, b):
 
 
 def rank_genes_fast(adOrig):
-    """
-    Efficiently replace each gene's expression value with its rank for each cell.
-    
-    Parameters:
-    -----------
-    adOrig : AnnData
-        The annotated data matrix.
+    """Rank gene expression values per cell without zeroing undetected genes.
+
+    Args:
+        adOrig: AnnData object containing the expression matrix.
 
     Returns:
-    --------
-    AnnData
-        A new AnnData object with ranked expression values.
+        AnnData object with expression values replaced by ranks.
     """
     
     adata = adOrig.copy()
@@ -193,22 +202,15 @@ def rank_genes_fast(adOrig):
 
 
 def top_genes_pca(adata, n_pcs, top_x_genes):
-    """
-    Get the top contributing genes for the first n_pcs principal components.
+    """Get the top contributing genes across the first n principal components.
 
-    Parameters:
-    -----------
-    adata : AnnData
-        The annotated data matrix.
-    n_pcs : int
-        Number of top principal components to consider.
-    top_x_genes : int
-        Number of top contributing genes to fetch for each principal component.
+    Args:
+        adata: AnnData object containing expression data. PCA is run if not already present.
+        n_pcs: Number of top principal components to consider.
+        top_x_genes: Number of top contributing genes to select per principal component.
 
     Returns:
-    --------
-    numpy.ndarray
-        Array of top contributing gene names.
+        numpy.ndarray of unique top contributing gene names across all specified PCs.
     """
     # Run PCA if not already present in adata
     if 'X_pca' not in adata.obsm.keys():
@@ -228,6 +230,16 @@ def extract_top_genes(
     dLevel,
     topX=25
 ):
+    """Extract top-ranked differentially expressed genes per cluster from filtered rank_genes_groups results.
+
+    Args:
+        adata: AnnData object with 'rank_genes_groups_filtered' stored in .uns.
+        dLevel: Column name in .obs containing cluster/category labels.
+        topX: Maximum number of top genes to extract per cluster. Defaults to 25.
+
+    Returns:
+        Dictionary mapping cluster names to lists of top gene names.
+    """
     # Get the list of clusters
     clusters = adata.obs[dLevel].cat.categories.tolist()
     # Dictionary to store top genes for each cluster
@@ -244,6 +256,15 @@ def extract_top_genes(
 
 
 def score_clusters_to_obsm(adx, gene_dict):
+    """Score cells for each cluster gene signature and store results in .obsm['gene_scores'].
+
+    Args:
+        adx: AnnData object containing expression data.
+        gene_dict: Dictionary mapping cluster names to lists of signature genes.
+
+    Returns:
+        AnnData copy with per-cluster gene scores stored in .obsm['gene_scores'] as a DataFrame.
+    """
     adata = adx.copy()
     # Number of cells and clusters
     n_cells = adata.shape[0]
@@ -320,7 +341,20 @@ def findSigGenes(
     max_out_group_fraction=0.20,
     method='wilcoxon'
 ):
-    """Deprecated: Use find_sig_genes instead."""
+    """Deprecated: Use :func:`find_sig_genes` instead.
+
+    Args:
+        adDat: AnnData object containing expression data.
+        dLevel: Column name in .obs for grouping cells.
+        topX: Number of top genes to return per group. Defaults to 25.
+        min_fold_change: Minimum fold change threshold. Defaults to 1.
+        min_in_group_fraction: Minimum fraction of cells in group expressing gene. Defaults to 0.30.
+        max_out_group_fraction: Maximum fraction of cells outside group expressing gene. Defaults to 0.20.
+        method: Statistical test method. Defaults to 'wilcoxon'.
+
+    Returns:
+        Dictionary mapping group names to arrays of marker gene names.
+    """
     warnings.warn(
         "findSigGenes is deprecated, use find_sig_genes instead",
         DeprecationWarning,
@@ -337,30 +371,6 @@ def findSigGenes(
     )
 
 
-"""
-    Attempts to find gene modules, or sets of genes that have similar expression patterns in adata
-
-    Parameters:
-    -----------
-    adata : AnnData
-        The annotated data matrix.
-    use_hvg : Boolean
-        Whether to limit search to highly variable genes
-    knn : int
-        number of nearest neighbors to consider
-    n_pcs : int
-        Number of top principal components to consider.
-    prefix : string
-        prepended to gene module index
-
-    Returns:
-    --------
-    adds the following to the passed adata:
-    
-    .uns['gene_modules'] : dict
-        dictionary of cluster name : gene list
-
-    """
 def find_knn_modules(
     adata,
     mean_cluster = True,
@@ -371,6 +381,33 @@ def find_knn_modules(
     prefix='gmod_',
     npcs_adjust = 1
 ):
+    """Find gene modules by clustering a gene-gene kNN graph built from expression profiles.
+
+    Transposes the expression matrix (genes become observations), computes PCA,
+    builds a kNN graph, and clusters with Leiden. Gene module assignments are
+    stored in ``adata.uns['knn_modules']`` and per-cell module scores in
+    ``adata.obsm['knn_module_scores']``.
+
+    Args:
+        adata: AnnData object with expression data and optionally HVG annotations.
+        mean_cluster (bool, optional): If True, aggregate cells by cluster (from
+            ``adata.obs[dLevel]``) before building the gene graph. Defaults to True.
+        dLevel (str, optional): Column in ``.obs`` holding cluster labels for
+            mean aggregation. Defaults to 'leiden'.
+        use_hvg (bool, optional): If True, restrict to highly variable genes
+            (requires ``adata.var['highly_variable']``). Defaults to True.
+        knn (int, optional): Number of nearest neighbors for the gene graph. Defaults to 5.
+        leiden_resolution (float, optional): Resolution parameter for Leiden clustering
+            of the gene graph. Defaults to 0.5.
+        prefix (str, optional): Prefix for gene module names. Defaults to 'gmod_'.
+        npcs_adjust (int, optional): Offset added to the PCA elbow point to determine
+            the number of PCs used for the gene kNN graph. Defaults to 1.
+
+    Returns:
+        None. Modifies ``adata`` in-place:
+            - ``adata.uns['knn_modules']``: dict mapping module names to gene lists.
+            - ``adata.obsm['knn_module_scores']``: DataFrame of per-cell module scores.
+    """
     adOps = adata.copy()
     if use_hvg:
         # add test that hvg is set
@@ -399,6 +436,21 @@ def score_gene_modules(
     adata,
     method = 'knn'
 ):
+    """Score cells for each gene module and store results in adata.obsm.
+
+    Reads gene modules from ``adata.uns['{method}_modules']``, scores each cell
+    using ``sc.tl.score_genes``, and stores the resulting DataFrame in
+    ``adata.obsm['{method}_module_scores']``.
+
+    Args:
+        adata: AnnData object containing expression data and gene modules in ``.uns``.
+        method (str, optional): Prefix identifying the module discovery method.
+            Looks up modules in ``adata.uns['{method}_modules']`` and writes scores
+            to ``adata.obsm['{method}_module_scores']``. Defaults to 'knn'.
+
+    Returns:
+        None. Modifies ``adata`` in-place by adding per-cell module scores to ``.obsm``.
+    """
     uns_name = method + "_modules"
     gene_dict = adata.uns[uns_name]
     # Number of cells and clusters
@@ -419,16 +471,16 @@ def score_gene_modules(
 
 
 def identify_ica_gene_modules(adata, k=10, max_iter=3):
-    """
-    Identify gene modules using FastICA and store in adata.uns['ica_modules'].
+    """Identify gene modules using FastICA and store them in adata.uns['ica_modules'].
 
-    Parameters:
-    - adata : anndata.AnnData
-        The input AnnData object with computed HVGs.
+    Args:
+        adata: AnnData object with highly variable genes already computed.
+        k: Number of independent components to extract. Defaults to 10.
+        max_iter: Maximum number of iterations for FastICA. Defaults to 3.
 
     Returns:
-    - anndata.AnnData
-        The modified AnnData object with ICA modules stored in uns['ica_modules'].
+        None. Modifies adata in-place by adding 'ica_modules' to .uns, a dictionary
+        mapping module names to lists of top contributing gene names.
     """
     # Check if HVGs have been computed
     if 'highly_variable' not in adata.var.columns:

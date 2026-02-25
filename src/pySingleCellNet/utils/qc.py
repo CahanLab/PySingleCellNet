@@ -5,22 +5,15 @@ from anndata import AnnData
 from scipy.stats import median_abs_deviation
 
 def call_outlier_cells(adata, metric = ["total_counts"], nmads = 5):
-    """
-    determines whether obs[metric] exceeds nmads 
-     
-    Parameters:
-    -----------
-    adata : AnnData
-        The input AnnData object containing single-cell data.
-    metric : str
-        The column name in `adata.obs` holding cell metric 
-    nmads : int, optional (default=5)
-        The number of median abs deviations to define a cell as an outlier
+    """Determines whether obs[metric] exceeds nmads.
 
-    Returns
-    -------
-    None
-        The function adds a new column to `adata.obs` named "outlier_" + metric, but does not return anything.
+    Args:
+        adata: The input AnnData object containing single-cell data.
+        metric: The column name in `adata.obs` holding cell metric.
+        nmads: The number of median abs deviations to define a cell as an outlier. Defaults to 5.
+
+    Returns:
+        None. The function adds a new column to `adata.obs` named "outlier_" + metric, but does not return anything.
     """
     M = adata.obs[metric]
     outlier = (M < np.median(M) - nmads * median_abs_deviation(M)) | (
@@ -34,15 +27,14 @@ def call_outlier_cells(adata, metric = ["total_counts"], nmads = 5):
 
 # also see pl.umi_counts_ranked
 def find_knee_point(adata, total_counts_column="total_counts"):
-    """
-    Identifies the knee point of the UMI count distribution in an AnnData object.
+    """Identifies the knee point of the UMI count distribution in an AnnData object.
 
-    Parameters:
-        adata (AnnData): The input AnnData object.
-        total_counts_column (str): Column in `adata.obs` containing total UMI counts. Default is "total_counts".
+    Args:
+        adata: The input AnnData object.
+        total_counts_column: Column in `adata.obs` containing total UMI counts. Defaults to "total_counts".
 
     Returns:
-        float: The UMI count value at the knee point.
+        The UMI count value at the knee point.
     """
     # Extract total UMI counts
     umi_counts = adata.obs[total_counts_column]
@@ -66,21 +58,15 @@ def find_knee_point(adata, total_counts_column="total_counts"):
 
 
 def mito_rib(adQ: AnnData, species: str = "MM", log1p = True, clean: bool = True) -> AnnData:
-    """
-    Calculate mitochondrial and ribosomal QC metrics and add them to the `.var` attribute of the AnnData object.
+    """Calculate mitochondrial and ribosomal QC metrics and add them to the `.var` attribute of the AnnData object.
 
-    Parameters
-    ----------
-    adQ : AnnData
-        Annotated data matrix with observations (cells) and variables (features).
-    species : str, optional (default: "MM")
-        The species of the input data. Can be "MM" (Mus musculus) or "HS" (Homo sapiens).
-    clean : bool, optional (default: True)
-        Whether to remove mitochondrial and ribosomal genes from the data.
+    Args:
+        adQ: Annotated data matrix with observations (cells) and variables (features).
+        species: The species of the input data. Can be "MM" (Mus musculus) or "HS" (Homo sapiens). Defaults to "MM".
+        log1p: Whether to log1p-transform QC metrics. Defaults to True.
+        clean: Whether to remove mitochondrial and ribosomal genes from the data. Defaults to True.
 
-    Returns
-    -------
-    AnnData
+    Returns:
         Annotated data matrix with QC metrics added to the `.var` attribute.
     """
     # Create a copy of the input data
@@ -124,33 +110,24 @@ def score_sex(
     y_genes=['Eif2s3y', 'Ddx3y', 'Uty'], 
     x_inactivation_genes=['Xist', 'Tsix']
 ):
-    """
-    Adds sex chromosome expression scores to an AnnData object.
-    
+    """Adds sex chromosome expression scores to an AnnData object.
+
     This function calculates two scores for each cell in a scRNA-seq AnnData object:
       - Y_score: the sum of expression values for a set of Y-chromosome specific genes.
       - X_inact_score: the sum of expression values for genes involved in X-chromosome inactivation.
-      
+
     The scores are added to the AnnData object's `.obs` DataFrame with the keys 'Y_score' and 'X_inact_score'.
-    
-    Parameters
-    ----------
-    adata : AnnData
-        An AnnData object containing scRNA-seq data, with gene names in `adata.var_names`.
-    y_genes : list of str, optional
-        List of Y-chromosome specific marker genes (default is ['Eif2s3y', 'Ddx3y', 'Uty']).
-    x_inactivation_genes : list of str, optional
-        List of genes involved in X-chromosome inactivation (default is ['Xist', 'Tsix']).
-        
-    Raises
-    ------
-    ValueError
-        If none of the Y-specific or X inactivation genes are found in `adata.var_names`.
-    
-    Returns
-    -------
-    None
-        The function modifies the AnnData object in place by adding the score columns to `adata.obs`.
+
+    Args:
+        adata: An AnnData object containing scRNA-seq data, with gene names in `adata.var_names`.
+        y_genes: List of Y-chromosome specific marker genes. Defaults to ['Eif2s3y', 'Ddx3y', 'Uty'].
+        x_inactivation_genes: List of genes involved in X-chromosome inactivation. Defaults to ['Xist', 'Tsix'].
+
+    Returns:
+        None. The function modifies the AnnData object in place by adding the score columns to `adata.obs`.
+
+    Raises:
+        ValueError: If none of the Y-specific or X inactivation genes are found in `adata.var_names`.
     """
     # Filter for genes that are available in the dataset.
     available_y_genes = [gene for gene in y_genes if gene in adata.var_names]

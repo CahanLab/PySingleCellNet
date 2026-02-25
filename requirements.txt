@@ -1,0 +1,24 @@
+# PySingleCellNet dependencies
+# Install with: pip install -r requirements.txt
+
+pandas>=1.5
+numpy>=1.23
+scikit-learn>=1.1
+scikit-misc>=0.3
+scanpy>=1.9
+anndata>=0.8
+statsmodels>=0.13
+scipy>=1.9
+matplotlib>=3.6
+seaborn>=0.12
+umap-learn>=0.5
+mygene>=3.2
+palettable>=3.3
+gseapy>=1.0
+alive_progress>=3.0
+python-igraph>=0.10
+marsilea>=0.4
+
+# Optional: uncomment for running tutorial notebooks
+# jupyter
+# ipykernel

@@ -8,8 +8,16 @@ All notable changes to PySingleCellNet should be listed here. The definition of 
 
 tl.score_gene_sets should add scores, one matrix to .obsm and not as columsn to .obs
 
+### Added
+- `requirements.txt` and `environment.yml` for reproducible environment setup
+- Installation instructions in `docs/install.md` for pip and conda workflows
+- Test suite (`tests/`) covering classifier, clustering, categorize, utils, and plotting
+- `tests/generate_test_data.py` to create small h5ad fixtures from full datasets
+- `CLAUDE.md` for AI-assisted development guidelines
+
 ### Changed
-- tl.cluster_subclusters layer should be None instead of counts 
+- tl.cluster_subclusters layer should be None instead of counts
+- Completed Google-style docstrings (Args/Returns/Raises) across all public functions for mkdocs auto-extraction
 
 ### Fixed
 

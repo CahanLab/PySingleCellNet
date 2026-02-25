@@ -74,30 +74,25 @@ def impute_knn_dropout(
     knn_key: str = "neighbors",
     layer_name: str = None
 ):
-    """
-    Impute zero‐expression values in `adata.X` (or `adata.raw.X`) by replacing each
-    zero with the weighted mean of that gene over its kNN, where weights come from
+    """Impute zero-expression values using kNN weighted means.
+
+    Replaces each zero in `adata.X` (or `adata.raw.X`) with the weighted mean
+    of that gene over its kNN, where weights come from
     `adata.obsp[f"{knn_key}_connectivities"]`.
 
-    Parameters
-    ----------
-    adata
-        Annotated data matrix. We will read from `adata.raw.X` if it exists;
-        otherwise from `adata.X`.
-    knn_key
-        Prefix for the two sparse matrices in `adata.obsp`:
-          - `adata.obsp[f"{knn_key}_connectivities"]`
-          - `adata.obsp[f"{knn_key}_distances"]`
-        In Scanpy’s `pp.neighbors(..., key_added=knn_key)`, you get exactly those two names.
-    layer_name
-        Name for the new layer to which the imputed expression matrix will be saved.
-        If None, defaults to `f"{knn_key}_imputed"`.
+    Args:
+        adata: Annotated data matrix. Reads from `adata.raw.X` if it exists;
+            otherwise from `adata.X`.
+        knn_key: Prefix for the two sparse matrices in `adata.obsp`:
+            `adata.obsp[f"{knn_key}_connectivities"]` and
+            `adata.obsp[f"{knn_key}_distances"]`. Defaults to "neighbors".
+        layer_name: Name for the new layer to which the imputed expression
+            matrix will be saved. Defaults to `f"{knn_key}_imputed"`.
 
-    Returns
-    -------
-    adata
-        The same AnnData, with an extra entry:
-        `adata.layers[layer_name]` = the imputed expression matrix (sparse if original was sparse).
+    Returns:
+        The same AnnData, with an extra entry
+        `adata.layers[layer_name]` containing the imputed expression matrix
+        (sparse if original was sparse).
     """
 
     # 1) Extract the “raw” or primary X matrix
@@ -154,9 +149,20 @@ def impute_knn_dropout(
 
 
 def read_broken_geo_mtx(path: str, prefix: str) -> ad.AnnData:
-    # assumes that obs and var in .mtx _could_ be switched
-    # determines which is correct by size of genes.tsv and barcodes.tsv
+    """Read a GEO-deposited MTX file where obs and var may be swapped.
 
+    Determines the correct orientation by comparing the dimensions of the
+    matrix against the sizes of genes.tsv and barcodes.tsv, transposing
+    if necessary.
+
+    Args:
+        path: Directory path containing the matrix files.
+        prefix: Filename prefix prepended to 'matrix.mtx', 'barcodes.tsv',
+            and 'genes.tsv'.
+
+    Returns:
+        An AnnData object with cells as observations and genes as variables.
+    """
     adata = sc.read_mtx(path + prefix + "matrix.mtx")
     cell_anno = pd.read_csv(path + prefix + "barcodes.tsv", delimiter='\t', header=None)
     n_cells = cell_anno.shape[0]
@@ -179,16 +185,14 @@ def read_broken_geo_mtx(path: str, prefix: str) -> ad.AnnData:
 def find_elbow(
     adata
 ):
-    """
-    Find the "elbow" index in the variance explained by principal components.
+    """Find the elbow index in the variance explained by principal components.
 
-    Parameters:
-    - variance_explained : list or array
-        Variance explained by each principal component, typically in decreasing order.
+    Args:
+        adata: AnnData object containing PCA results in
+            `adata.uns['pca']['variance_ratio']`.
 
     Returns:
-    - int
-        The index corresponding to the "elbow" in the variance explained plot.
+        The index corresponding to the elbow in the variance explained plot.
     """
     variance_explained = adata.uns['pca']['variance_ratio']
     # Coordinates of all points
@@ -210,27 +214,23 @@ def find_elbow(
 
 
 def assign_optimal_cluster(adata, cluster_reports, new_col="optimal_cluster"):
-    """
-    Determine the optimal cluster label per cell across multiple cluster assignments
-    by comparing F1-scores, then prepend the chosen label with the name of the .obs
-    column that provided it.
-    
-    Parameters
-    ----------
-    adata : anndata.AnnData
-        The annotated single-cell dataset.
-    cluster_reports : dict[str, pd.DataFrame]
-        A dictionary where keys are column names in `adata.obs` (each key 
-        corresponds to one clustering scheme), and values are DataFrames 
-        with classification metrics including 'Label' and 'F1-Score'.
-    new_col : str, optional
-        The name of the new `.obs` column in which the optimal cluster labels 
-        will be stored. Default is "optimal_cluster".
-    
-    Returns
-    -------
-    None
-        The function adds a new column to `adata.obs` but does not return anything.
+    """Determine the optimal cluster label per cell by comparing F1-scores.
+
+    For each cell, selects the cluster assignment with the highest F1-score
+    across multiple clustering schemes and prepends the chosen label with
+    the name of the .obs column that provided it.
+
+    Args:
+        adata: The annotated single-cell dataset.
+        cluster_reports: A dictionary where keys are column names in
+            `adata.obs` (each corresponding to one clustering scheme),
+            and values are DataFrames with classification metrics
+            including 'Label' and 'F1-Score'.
+        new_col: The name of the new `.obs` column in which the optimal
+            cluster labels will be stored. Defaults to "optimal_cluster".
+
+    Returns:
+        None. Adds a new column to `adata.obs`.
     """
     # Prepare a list to hold the chosen cluster label (prepended with obs_col name) per cell
     optimal_labels = np.empty(adata.n_obs, dtype=object)
@@ -280,37 +280,27 @@ def reassign_selected_clusters(
     new_label,
     clusters_to_clean=None
 ):
-    """
-    Reassign cells whose cluster is in `clusters_to_clean` by picking the 
-    highest-correlation cluster from the dendrogram correlation matrix.
+    """Reassign selected clusters to their highest-correlation neighbor.
 
-    We fix Scanpy's default behavior where:
-      - 'categories_ordered' (leaf order) != the row order in 'correlation_matrix'.
-      - Instead, 'categories_idx_ordered' is the permutation that maps leaf positions 
-        to row indices in the original correlation matrix.
-    
-    Parameters
-    ----------
-    adata : anndata.AnnData
-        Must contain:
-          - adata.obs[current_label]: the current cluster assignments (strings).
-          - adata.uns[dendro_key]: a dict with:
-             * "categories_ordered": list of cluster labels in dendrogram (leaf) order
-             * "categories_idx_ordered": list of row indices corresponding to the above
-             * "correlation_matrix": the NxN matrix of correlations in the original order
-    dendro_key : str
-        Key in adata.uns that has the dendrogram data.
-    current_label : str
-        Column in adata.obs containing the current cluster assignments.
-    new_label : str
-        Column name in adata.obs where we store the reassigned clusters.
-    clusters_to_clean : list or set of str, optional
-        Labels that should be reassigned. If None, nothing will be cleaned.
-    
-    Returns
-    -------
-    None
-        Adds a new column `adata.obs[new_label]` with updated assignments.
+    For cells whose cluster is in `clusters_to_clean`, picks the
+    highest-correlation cluster from the dendrogram correlation matrix.
+    Accounts for Scanpy's behavior where 'categories_ordered' (leaf order)
+    differs from the row order in 'correlation_matrix'.
+
+    Args:
+        adata: Must contain `adata.obs[current_label]` with current cluster
+            assignments and `adata.uns[dendro_key]` with keys
+            'categories_ordered', 'categories_idx_ordered', and
+            'correlation_matrix'.
+        dendro_key: Key in `adata.uns` that has the dendrogram data.
+        current_label: Column in `adata.obs` containing the current cluster
+            assignments.
+        new_label: Column name in `adata.obs` where reassigned clusters
+            will be stored.
+        clusters_to_clean: Labels that should be reassigned. Defaults to None.
+
+    Returns:
+        None. Adds a new column `adata.obs[new_label]` with updated assignments.
     """
     
     if clusters_to_clean is None:
@@ -457,23 +447,22 @@ def reduce_cells(
     cluster_key: str = "cluster",
     use_raw: bool = True
 ) -> ad.AnnData:
-    """
-    Reduce the number of cells in an AnnData object by combining transcript counts across clusters.
+    """Reduce cell count by combining transcript counts into meta-cells.
 
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data matrix with observations (cells) and variables (features).
-    n_cells : int, optional (default: 5)
-        The number of cells to combine into a meta-cell.
-    cluster_key : str, optional (default: "cluster")
-        The key in `adata.obs` that specifies the cluster identity of each cell.
-    use_raw : bool, optional (default: True)
-        Whether to use the raw count matrix in `adata.raw` instead of `adata.X`.
+    Groups cells by cluster and sums transcript counts across randomly
+    selected sets of `n_cells` cells to create meta-cells.
 
-    Returns
-    -------
-    AnnData
+    Args:
+        adata: Annotated data matrix with observations (cells) and
+            variables (features).
+        n_cells: The number of cells to combine into a meta-cell.
+            Defaults to 5.
+        cluster_key: The key in `adata.obs` that specifies the cluster
+            identity of each cell. Defaults to "cluster".
+        use_raw: Whether to use the raw count matrix in `adata.raw`
+            instead of `adata.X`. Defaults to True.
+
+    Returns:
         Annotated data matrix with reduced number of cells.
     """
     # Create a copy of the input data
@@ -536,22 +525,21 @@ def reduce_cells(
     return adata2
 
 def create_mean_cells(adata, obs_key, obs_value, n_mean_cells, n_cells):
-    """
-    Average n_cells randomly sampled cells from obs_key == obs_value obs, n_mean_cells times
+    """Create meta-cells by averaging randomly sampled cells.
 
-    Parameters:
-    adata: anndata.AnnData
-        The annotated data matrix of shape n_obs x n_vars. Rows correspond to cells and columns to genes.
-    cluster_key: str
-        The key in the obs field that identifies the clusters.
-    n_mean_cells: int
-        The number of meta-cells to create.
-    n_cells: int
-        The number of cells to randomly select from each cluster.
+    Repeatedly samples `n_cells` cells where `obs_key == obs_value` and
+    averages their expression, producing `n_mean_cells` meta-cells.
+
+    Args:
+        adata: The annotated data matrix of shape n_obs x n_vars.
+        obs_key: The key in `adata.obs` used to select cells.
+        obs_value: The value in `adata.obs[obs_key]` to filter on.
+        n_mean_cells: The number of meta-cells to create.
+        n_cells: The number of cells to randomly select for each
+            meta-cell.
 
     Returns:
-    anndata.AnnData
-        Annotated data matrix with meta-cells.
+        Annotated data matrix containing the meta-cells.
     """
     if obs_key not in adata.obs:
         raise ValueError(f"Key '{obs_key}' not found in adata.obs")
@@ -590,24 +578,21 @@ def create_hybrid_cells(
     groupby: str,
     n_hybrid_cells: int
 ) -> ad.AnnData:
-    """
-    Generate hybrid cells by taking the mean of transcript counts for randomly selected cells
-    from the specified groups in proportions as indicated by celltypes
+    """Generate hybrid cells by averaging randomly selected cells from specified groups.
 
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data matrix with observations (cells) and variables (genes).
-    celltype_counts : dict
-        keys indicate the subset of cells and the values are the number of cells to sample from each cell type.
-    groupby : str
-        The name of the column in `adata.obs` to group cells by before selecting cells at random.
-    n_hybrid_cells : int
-        The number of hybrid cells to generate.
+    Takes the mean of transcript counts for cells sampled from groups
+    in proportions indicated by `celltype_counts`.
 
-    Returns
-    -------
-    AnnData
+    Args:
+        adata: Annotated data matrix with observations (cells) and
+            variables (genes).
+        celltype_counts: Keys indicate the subset of cells and values
+            are the number of cells to sample from each cell type.
+        groupby: The name of the column in `adata.obs` to group cells
+            by before selecting cells at random.
+        n_hybrid_cells: The number of hybrid cells to generate.
+
+    Returns:
         Annotated data matrix containing only the hybrid cells.
     """
     hybrid_list = []
@@ -641,21 +626,17 @@ def sample_cells(
     celltype_counts: dict,
     groupby: str
 )-> ad.AnnData:
-    """
-    Sample cells as specified by celltype_counts and groub_by
+    """Sample cells as specified by celltype_counts and groupby.
 
-    Parameters
-    ----------
-    adata : AnnData
-        Annotated data matrix with observations (cells) and variables (genes).
-    celltype_counts: dict
-        keys indicate the subset of cells and the values are the number of cells to sample from each cell type.
-    groupby : str
-        The name of the column in `adata.obs` to group cells by before selecting cells at random.
+    Args:
+        adata: Annotated data matrix with observations (cells) and
+            variables (genes).
+        celltype_counts: Keys indicate the subset of cells and values
+            are the number of cells to sample from each cell type.
+        groupby: The name of the column in `adata.obs` to group cells
+            by before selecting cells at random.
 
-    Returns
-    -------
-    AnnData
+    Returns:
         Annotated data matrix containing only the selected cells.
     """
 
@@ -874,7 +855,26 @@ def add_ambient_rna(
     n_cells_to_sample: int = 10,
     weight_of_ambient: float = 0.05
 ) -> ad.AnnData:
+    """Add simulated ambient RNA to non-target cells.
 
+    For cells not matching `obs_key == obs_val`, blends their expression
+    with the mean expression of randomly sampled target cells, simulating
+    ambient RNA contamination.
+
+    Args:
+        adata: AnnData object containing expression data.
+        obs_key: Column name in `adata.obs` used to identify target cells.
+        obs_val: Value in `adata.obs[obs_key]` that defines the target
+            (ambient source) cells.
+        n_cells_to_sample: Number of target cells to sample when computing
+            each ambient mean. Defaults to 10.
+        weight_of_ambient: Fraction of the final expression contributed by
+            the ambient signal. Defaults to 0.05.
+
+    Returns:
+        The modified AnnData object with updated expression for non-target
+        cells.
+    """
     # What cells will be updated?
     non_cluster_cells = adata[adata.obs[obs_key] != obs_val, :].copy()
     n_mean_cells = non_cluster_cells.n_obs
@@ -897,6 +897,17 @@ def add_ambient_rna(
 
 # to do: params for other species; error handling
 def get_Y_chr_genes(adata):
+    """Get Y chromosome gene names present in the AnnData object.
+
+    Queries BioMart for mouse gene annotations and returns the subset of
+    Y chromosome genes that are found in `adata.var.index`.
+
+    Args:
+        adata: AnnData object whose `var.index` contains gene symbols.
+
+    Returns:
+        A list of Y chromosome gene names present in the dataset.
+    """
     gene_chrs = sc.queries.biomart_annotations("mmusculus",["mgi_symbol", "ensembl_gene_id", "chromosome_name"],).set_index("mgi_symbol")
     ygenes = gene_chrs[gene_chrs["chromosome_name"]=='Y']
     ygenes = ygenes[ygenes.index.isin(adata.var.index)]
@@ -910,45 +921,37 @@ def extract_top_bottom_genes(
     sort_by: str = 'scores',
     extraction_map: Dict[str, str] = None
 ) -> Dict[str, List[str]]:
-    """
-    Extracts top and bottom ngenes from each gene table in deg_res and organizes them
-    into a dictionary with combined keys of group and sample names.
+    """Extract top and bottom genes from differential expression results.
 
-    Parameters:
-    -----------
-    deg_res : dict
-        A dictionary containing differential expression results with keys:
-            - 'sample_names': List of sample names (e.g., ['Singular', 'None'])
-            - 'geneTab_dict': Dictionary where each key is a group name and each value is
-                              a Pandas DataFrame with gene information.
-    ngenes : int
-        The number of top or bottom genes to extract from each gene table.
-    sort_by : str, optional (default='scores')
-        The column name in the gene tables to sort by.
-    extraction_map : dict, optional
-        A dictionary mapping sample names to extraction behavior ('top' or 'bottom').
-        If not provided, defaults to:
-            - First sample name: 'top'
-            - Second sample name: 'bottom'
-            - Additional sample names: 'top'
+    Extracts the top and bottom `ngenes` from each gene table in `deg_res`
+    and organizes them into a dictionary with combined keys of group and
+    sample names.
+
+    Args:
+        deg_res: A dictionary containing differential expression results
+            with keys 'sample_names' (list of sample names) and
+            'geneTab_dict' (dict mapping group names to DataFrames with
+            gene information).
+        ngenes: The number of top or bottom genes to extract from each
+            gene table.
+        sort_by: The column name in the gene tables to sort by.
+            Defaults to 'scores'.
+        extraction_map: A dictionary mapping sample names to extraction
+            behavior ('top' or 'bottom'). If not provided, defaults to
+            'top' for the first sample, 'bottom' for the second, and
+            'top' for any additional samples. Defaults to None.
 
     Returns:
-    --------
-    result_dict : dict
-        A dictionary where each key is a combination of group and sample name
-        (e.g., 'Meso.Nascent_Singular') and each value is a list of gene names.
-        - For 'top', the list contains the top ngenes based on sort_by.
-        - For 'bottom', the list contains the bottom ngenes based on sort_by.
+        A dictionary where each key is a combination of group and sample
+        name (e.g., 'Meso.Nascent_Singular') and each value is a list of
+        gene names.
 
     Raises:
-    -------
-    KeyError:
-        If 'sample_names' or 'geneTab_dict' keys are missing in deg_res,
-        or if 'sort_by' is not a column in the gene tables.
-    ValueError:
-        If ngenes is not a positive integer or if 'sample_names' does not contain at least one entry.
-    TypeError:
-        If the input types are incorrect.
+        KeyError: If 'sample_names' or 'geneTab_dict' keys are missing in
+            deg_res, or if 'sort_by' is not a column in the gene tables.
+        ValueError: If ngenes is not a positive integer or if
+            'sample_names' does not contain at least one entry.
+        TypeError: If the input types are incorrect.
     """
     # Input Validation
     required_keys = ['sample_names', 'geneTab_dict']
@@ -1025,13 +1028,35 @@ def extract_top_bottom_genes(
 
 
 def pull_out_genes(
-    diff_genes_dict: dict, 
+    diff_genes_dict: dict,
     cell_type: str,
-    category: str, 
+    category: str,
     num_genes: int = 0,
-    order_by = "logfoldchanges", 
+    order_by = "logfoldchanges",
     threshold = 2) -> list:
+    """Extract significant genes for a cell type from differential expression results.
 
+    Filters genes by adjusted p-value threshold, then sorts by the specified
+    column. Sort direction depends on the position of `category` in
+    `diff_genes_dict['category_names']`: descending for the first category,
+    ascending otherwise.
+
+    Args:
+        diff_genes_dict: Dictionary containing differential expression results
+            with keys 'geneTab_dict' (dict of DataFrames) and
+            'category_names' (list of category names).
+        cell_type: Key into 'geneTab_dict' identifying the cell type.
+        category: Category name used to determine sort direction.
+        num_genes: Number of top genes to return. If 0, returns all
+            significant genes. Defaults to 0.
+        order_by: Column name to sort genes by. Defaults to
+            "logfoldchanges".
+        threshold: Adjusted p-value threshold for filtering genes.
+            Defaults to 2.
+
+    Returns:
+        A list of gene names passing the significance filter.
+    """
     ans = []
     #### xdat = diff_genes_dict[cell_type]
     xdat = diff_genes_dict['geneTab_dict'][cell_type]
@@ -1057,13 +1082,33 @@ def pull_out_genes(
 
 
 def pull_out_genes_v2(
-    diff_genes_dict: dict, 
+    diff_genes_dict: dict,
     cell_type: str,
-    category: str, 
+    category: str,
     num_genes: int = 0,
-    order_by = "logfoldchanges", 
+    order_by = "logfoldchanges",
     threshold = 2) -> list:
+    """Extract significant genes for a cell type from differential expression results.
 
+    Similar to `pull_out_genes`, but infers category names from the first
+    key in `diff_genes_dict` rather than using a fixed 'category_names' key.
+
+    Args:
+        diff_genes_dict: Dictionary containing differential expression results
+            with 'geneTab_dict' (dict of DataFrames) and a first key whose
+            value is a list of category names.
+        cell_type: Key into 'geneTab_dict' identifying the cell type.
+        category: Category name used to determine sort direction.
+        num_genes: Number of top genes to return. If 0, returns all
+            significant genes. Defaults to 0.
+        order_by: Column name to sort genes by. Defaults to
+            "logfoldchanges".
+        threshold: Adjusted p-value threshold for filtering genes.
+            Defaults to 2.
+
+    Returns:
+        A list of gene names passing the significance filter.
+    """
     ans = []
     #### xdat = diff_genes_dict[cell_type]
     xdat = diff_genes_dict['geneTab_dict'][cell_type]

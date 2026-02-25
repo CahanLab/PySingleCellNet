@@ -28,6 +28,37 @@ def plot_module_heatmap(
     show_gene_labels: bool = False,                   # use Marsilea Labels (heavy for many genes)
     show: bool = True
 ):
+    """Plot a heatmap of gene module expression across cell types.
+
+    Assembles an expression matrix from selected gene modules, optionally z-scores
+    genes, orders modules by similarity, and renders the heatmap using Marsilea
+    (with a seaborn clustermap fallback). Cell type and module color bars are added
+    as side annotations.
+
+    Args:
+        adata (AnnData): An AnnData object containing gene expression data.
+        uns_key (str, optional): Key in `adata.uns` storing the module dictionary. Defaults to "knn_modules".
+        modules (dict[str, list[str]], optional): Dictionary mapping module names to gene lists.
+            Overrides uns_key if provided. Defaults to None.
+        cell_type_col (str, optional): Column in `.obs` for cell type labels. Defaults to "cell_type".
+        layer (str, optional): Layer in `adata.layers` to use. None uses `adata.X`. Defaults to None.
+        top_genes (dict[str, list[str]], optional): Pre-selected top genes per module (e.g. from
+            subset_modules_top_genes). Defaults to None.
+        top_n_per_module (int, optional): Number of top genes per module when top_genes is None. Defaults to 20.
+        zscore_genes (bool, optional): Whether to z-score normalize genes. Defaults to True.
+        max_cells_per_type (int, optional): Maximum cells to sample per cell type. Defaults to 250.
+        order_modules_by_similarity (bool, optional): Whether to reorder modules by centroid similarity. Defaults to True.
+        module_similarity_on (str, optional): Basis for module similarity: 'celltype_means' or 'cells'. Defaults to "celltype_means".
+        cmap (str, optional): Colormap for the heatmap. Defaults to "vlag".
+        use_marsilea (str, optional): Whether to use Marsilea: 'auto', 'yes', or 'no'. Defaults to "auto".
+        width_per_gene (float, optional): Marsilea width in inches per gene column. Defaults to 0.12.
+        height_per_cell (float, optional): Marsilea height in inches per cell row. Defaults to 0.012.
+        show_gene_labels (bool, optional): Whether to display gene name labels. Defaults to False.
+        show (bool, optional): Whether to render the plot immediately. Defaults to True.
+
+    Returns:
+        Marsilea Heatmap or seaborn ClusterGrid: The heatmap object.
+    """
     # --- fetch modules ---
     if modules is None:
         if uns_key not in adata.uns or not isinstance(adata.uns[uns_key], dict):

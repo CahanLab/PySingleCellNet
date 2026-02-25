@@ -40,6 +40,9 @@ dependencies = [
   "marsilea"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
 [project.urls]
 Documentation = "https://cahanlab-pysinglecellnet.readthedocs-hosted.com/"
 Source        = "https://github.com/CahanLab/PySingleCellNet"
@@ -62,4 +65,8 @@ exclude = ["docs"]
 [tool.setuptools_scm]
 version_scheme = "only-version"
 local_scheme   = "no-local-version"
-write_to       = "src/pySingleCellNet/_version.py" 
+write_to       = "src/pySingleCellNet/_version.py"
+
+# ────────────── pytest ──────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,3 +1,8 @@
+.gitignore
+.claude/
+CLAUDE/*
+CLAUDE*
+data/*
 inProgressFunctions/
 .DS_Store
 build/ 
@@ -6,3 +11,5 @@ pySingleCellNet.egg-info/
 __pycache__/
 site/
 _version.py
+tests/data/*.h5ad
+TODO.md

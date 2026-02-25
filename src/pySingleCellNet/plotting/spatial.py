@@ -44,6 +44,9 @@ def scatter_genes_oneper(
         panel_width: Width (in inches) of each panel when `figsize` is None.
         n_rows: Number of rows in the grid. Default 1.
 
+    Returns:
+        None: Displays the figure.
+
     Raises:
         ValueError: If embedding is missing/malformed or genes not found.
     """
@@ -122,6 +125,24 @@ def plot_spatial_two_genes_stack(
     width_ratios: Tuple[float, float] = (3, 1),
     **kwargs
 ):
+    """Plot stacked bivariate spatial gene expression panels for multiple AnnData objects.
+
+    Creates a vertically stacked grid of bivariate spatial plots, one row per AnnData
+    object, each showing the co-expression of two genes using the provided bivariate
+    colormap.
+
+    Args:
+        adatas (list[AnnData]): List of AnnData objects, each with spatial coordinates.
+        gene1 (str): First gene name to plot.
+        gene2 (str): Second gene name to plot.
+        cmap (ListedColormap): Bivariate colormap (n x n LUT) from `make_bivariate_cmap`.
+        width_ratios (tuple[float, float], optional): Relative widths of (scatter, colorbar)
+            panels. Defaults to (3, 1).
+        **kwargs: Additional keyword arguments passed to `spatial_two_genes`.
+
+    Returns:
+        matplotlib.figure.Figure: The generated figure object.
+    """
     n = len(adatas)
     fig, axes = plt.subplots(
         n, 2,
@@ -194,6 +215,9 @@ def spatial_two_genes(
         width_ratios: 2‐tuple giving the relative widths of
                   (scatter_panel, legend_panel). Defaults to (3,1).
     
+    Returns:
+        None: Displays the figure.
+
     Raises:
         ValueError: If spatial coords are missing/malformed or
                     if `priority_metric` is invalid.
@@ -356,6 +380,9 @@ def embed_bivariate_multi(
             controlling relative widths in the GridSpec.
         panel_size: Size (inches) of each scatter panel (both width and height).
 
+    Returns:
+        None: Displays the figure.
+
     Raises:
         ValueError: If genes1/genes2 lengths differ or coords missing.
     """
@@ -505,6 +532,9 @@ def spatial_contours(
             - smooth_sigma: float Gaussian blur sigma (default 2)
             - contour_kwargs: dict of line style kwargs (default {'colors':'k','linewidths':1})
         scatter_kwargs: Extra kwargs passed to `ax.scatter`.
+
+    Returns:
+        None: Displays the figure.
 
     Raises:
         ValueError: If any gene is missing or spatial coords are malformed.

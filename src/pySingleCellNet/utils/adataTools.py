@@ -181,6 +181,17 @@ def rename_cluster_labels(
     adata.obs[new_col] = adata.obs[new_col].astype("category")
 
 def limit_anndata_to_common_genes(anndata_list):
+    """Subset each AnnData in a list to only the genes shared across all objects.
+
+    Each AnnData object is modified in place to retain only the intersection of
+    variable names (genes) present in every object in the list.
+
+    Args:
+        anndata_list: A list of AnnData objects to subset to common genes.
+
+    Returns:
+        None. Each AnnData object in the list is modified in-place.
+    """
     # Find the set of common genes across all anndata objects
     common_genes = set(anndata_list[0].var_names)
     for adata in anndata_list[1:]:
@@ -196,6 +207,15 @@ def limit_anndata_to_common_genes(anndata_list):
     #return common_genes
 
 def remove_genes(adata, genes_to_exclude=None):
+    """Remove specified genes from an AnnData object.
+
+    Args:
+        adata: The AnnData object to filter.
+        genes_to_exclude: A list of gene names to remove. Defaults to None.
+
+    Returns:
+        A new AnnData object with the specified genes excluded.
+    """
     adnew = adata[:,~adata.var_names.isin(genes_to_exclude)].copy()
     return adnew
 
@@ -212,31 +232,23 @@ def drop_pcs_from_embedding(
 ) -> Dict[str, str]:
     """Create PCA-derived slots that exclude specific principal components.
 
-    Parameters
-    ----------
-    adata
-        AnnData containing PCA results (``.obsm[base_obsm_key]``).
-    pc_indices
-        Iterable of PC identifiers to drop. By default interpreted as 1-indexed
-        (PC1 == 1); set ``assume_one_indexed=False`` for zero-based indices.
-    base_obsm_key
-        Name of the PCA embedding in ``adata.obsm`` (default ``"X_pca"``).
-    pca_uns_key
-        ``adata.uns`` entry that stores PCA metadata (default ``"pca"``).
-    base_varm_key
-        ``adata.varm`` key with per-gene loadings (default ``"PCs"``).
-    new_suffix
-        Optional suffix used when naming the derived slots. If omitted, a suffix
-        like ``"noPC1_2"`` is generated from the requested indices.
-    assume_one_indexed
-        Whether ``pc_indices`` are 1-indexed (default ``True``). If ``False``,
-        indices are treated as zero-based column positions.
+    Args:
+        adata: AnnData containing PCA results (`.obsm[base_obsm_key]`).
+        pc_indices: Iterable of PC identifiers to drop. By default interpreted as
+            1-indexed (PC1 == 1); set `assume_one_indexed=False` for zero-based
+            indices.
+        base_obsm_key: Name of the PCA embedding in `adata.obsm`. Defaults to
+            "X_pca".
+        pca_uns_key: `adata.uns` entry that stores PCA metadata. Defaults to "pca".
+        base_varm_key: `adata.varm` key with per-gene loadings. Defaults to "PCs".
+        new_suffix: Optional suffix used when naming the derived slots. If omitted,
+            a suffix like "noPC1_2" is generated from the requested indices.
+        assume_one_indexed: Whether `pc_indices` are 1-indexed. Defaults to True.
+            If False, indices are treated as zero-based column positions.
 
-    Returns
-    -------
-    dict
-        Mapping describing the new keys that were created:
-        ``{"obsm": new_obsm_key, "varm": new_varm_key, "variance_ratio": new_var_ratio_key}``.
+    Returns:
+        A dict mapping describing the new keys that were created:
+        `{"obsm": new_obsm_key, "varm": new_varm_key, "variance_ratio": new_var_ratio_key}`.
     """
 
     if base_obsm_key not in adata.obsm:
@@ -292,34 +304,32 @@ def filter_anndata_slots(
     *,
     keep_dependencies: bool = True,
 ):
-    """
-    Return a filtered COPY of `adata` that only keeps requested slots/keys.
+    """Return a filtered copy of `adata` that only keeps requested slots/keys.
+
     Unspecified slots (or with value None) are cleared.
 
-    Parameters
-    ----------
-    adata : AnnData
-    slots_to_keep : dict
-        Keys among {'obs','var','obsm','obsp','varm','varp','uns'}.
-        Values are lists of names to keep within that slot; if a slot is not
-        present in the dict or is None, all contents of that slot are removed.
-        Example:
-            {'obs': ['leiden','sample'],
-             'obsm': ['X_pca','X_umap'],
-             'uns':  ['neighbors', 'pca', 'umap']}
-    keep_dependencies : bool, default True
-        If True, automatically keep cross-slot items that are commonly required:
-          - For each neighbors block in `.uns[<key>]` with
-            'connectivities_key' / 'distances_key', also keep those in `.obsp`.
-          - If an `.obsp` key ends with '_connectivities'/'_distances', also keep
-            the matching `.uns[<prefix>]` if present.
-          - If keeping 'X_pca' in `.obsm`, also keep `.uns['pca']` and `.varm['PCs']` if present.
-          - If keeping 'X_umap' in `.obsm`, also keep `.uns['umap']` if present.
+    Args:
+        adata: The AnnData object to filter.
+        slots_to_keep: Keys among {'obs','var','obsm','obsp','varm','varp','uns'}.
+            Values are lists of names to keep within that slot; if a slot is not
+            present in the dict or is None, all contents of that slot are removed.
+            Example::
 
-    Returns
-    -------
-    AnnData
-        A copy with filtered slots.
+                {'obs': ['leiden','sample'],
+                 'obsm': ['X_pca','X_umap'],
+                 'uns':  ['neighbors', 'pca', 'umap']}
+
+        keep_dependencies: If True, automatically keep cross-slot items that are
+            commonly required. For each neighbors block in `.uns[<key>]` with
+            'connectivities_key' / 'distances_key', also keep those in `.obsp`.
+            If an `.obsp` key ends with '_connectivities'/'_distances', also keep
+            the matching `.uns[<prefix>]` if present. If keeping 'X_pca' in
+            `.obsm`, also keep `.uns['pca']` and `.varm['PCs']` if present. If
+            keeping 'X_umap' in `.obsm`, also keep `.uns['umap']` if present.
+            Defaults to True.
+
+    Returns:
+        A new AnnData object that is a copy with filtered slots.
     """
     ad = adata.copy()
 
@@ -410,28 +420,22 @@ def filter_anndata_slots(
     return ad
 
 def filter_adata_by_group_size(adata: ad.AnnData, groupby: str, ncells: int = 20) -> ad.AnnData:
-    """
-    Filters an AnnData object to retain only cells from groups with at least 'ncells' cells.
-    
-    Parameters:
-    -----------
-    adata : AnnData
-        The input AnnData object containing single-cell data.
-    groupby : str
-        The column name in `adata.obs` used to define groups (e.g., cluster labels).
-    ncells : int, optional (default=20)
-        The minimum number of cells a group must have to be retained.
-    
+    """Filter an AnnData object to retain only groups with at least `ncells` cells.
+
+    Args:
+        adata: The input AnnData object containing single-cell data.
+        groupby: The column name in `adata.obs` used to define groups (e.g.,
+            cluster labels).
+        ncells: The minimum number of cells a group must have to be retained.
+            Defaults to 20.
+
     Returns:
-    --------
-    filtered_adata : AnnData
-        A new AnnData object containing only cells from groups with at least 'ncells' cells.
-    
+        A new AnnData object containing only cells from groups with at least
+        `ncells` cells.
+
     Raises:
-    -------
-    ValueError:
-        - If `groupby` is not a column in `adata.obs`.
-        - If `ncells` is not a positive integer.
+        ValueError: If `groupby` is not a column in `adata.obs`, or if `ncells`
+            is not a positive integer.
     """
     # Input Validation
     if not isinstance(adata, ad.AnnData):

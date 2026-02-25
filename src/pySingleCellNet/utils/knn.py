@@ -6,16 +6,15 @@ import anndata as ad
 import igraph as ig
 
 def build_knn_graph(correlation_matrix, labels, k=5):
-    """
-    Build a k-nearest neighbors (kNN) graph from a correlation matrix.
-    
-    Parameters:
-        correlation_matrix (ndarray): Square correlation matrix.
-        labels (list): Node labels corresponding to the rows/columns of the correlation matrix.
-        k (int): Number of nearest neighbors to connect each node to.
-    
+    """Build a k-nearest neighbors (kNN) graph from a correlation matrix.
+
+    Args:
+        correlation_matrix: Square correlation matrix.
+        labels: Node labels corresponding to the rows/columns of the correlation matrix.
+        k: Number of nearest neighbors to connect each node to. Defaults to 5.
+
     Returns:
-        igraph.Graph: kNN graph.
+        kNN graph as an igraph.Graph.
     """
 
     # import igraph as ig

@@ -260,8 +260,8 @@ def collect_gsea_results_from_dict(
             Each object has a .res2d DataFrame with columns ["Term", "NES", "FDR q-val"].
         fdr_thr (float, optional): FDR threshold above which NES values are set to 0. 
             Defaults to 0.25.
-        top_n (int, optional): Maximum number of positive and negative results 
-            (by NES) to keep per cell type. Defaults to 10.
+        top_n (int, optional): Maximum number of positive and negative results
+            (by NES) to keep per cell type. Defaults to 3.
     
     Returns:
         pd.DataFrame: A DataFrame whose rows are the union of selected gene sets 

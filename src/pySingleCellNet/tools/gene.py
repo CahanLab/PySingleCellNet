@@ -26,37 +26,33 @@ def build_gene_knn(
     metric: str = "euclidean",
     key: str = "gene"
 ):
-    """
-    Compute a gene–gene kNN graph (hard or Gaussian‑weighted) and store sparse connectivities & distances in adata.uns.
+    """Compute a gene-gene kNN graph (hard or Gaussian-weighted) and store sparse connectivities and distances in adata.uns.
 
-    Parameters
-    ----------
-    adata
-        AnnData object (cells × genes). Internally transposed to (genes × cells).
-    mask_var
-        If not None, must be a column name in adata.var of boolean values.
-        Only genes where adata.var[mask_var] == True are included. If None, use all genes.
-    mean_cluster
-        If True, aggregate cells by cluster defined in adata.obs[groupby].
-        The kNN graph is computed on the mean‑expression profiles of each cluster
-        (genes × n_clusters) rather than genes × n_cells.
-    groupby
-        Column in adata.obs holding cluster labels. Only used if mean_cluster=True.
-    knn
-        Integer: how many neighbors per gene to consider.
-        Passed as n_neighbors=knn to sc.pp.neighbors.
-    use_knn
-        Boolean: passed to sc.pp.neighbors as knn=use_knn. 
-        - If True, builds a hard kNN graph (only k nearest neighbors).  
-        - If False, uses a Gaussian kernel to weight up to the k-th neighbor.
-    metric
-        Distance metric for kNN computation (e.g. "euclidean", "manhattan", "correlation", etc.).
-        If metric=="correlation" and the gene‑expression matrix is sparse, it will be converted to dense.
-    key
-        Prefix under which to store results in adata.uns. The function sets:
-          - adata.uns[f"{key}_gene_index"]
-          - adata.uns[f"{key}_connectivities"]
-          - adata.uns[f"{key}_distances"]
+    Args:
+        adata: AnnData object (cells x genes). Internally transposed to (genes x cells).
+        mask_var: If not None, must be a column name in adata.var of boolean values.
+            Only genes where adata.var[mask_var] == True are included. If None, use all genes.
+        mean_cluster: If True, aggregate cells by cluster defined in adata.obs[groupby].
+            The kNN graph is computed on the mean-expression profiles of each cluster
+            (genes x n_clusters) rather than genes x n_cells.
+        groupby: Column in adata.obs holding cluster labels. Only used if mean_cluster=True.
+        knn: How many neighbors per gene to consider.
+            Passed as n_neighbors=knn to sc.pp.neighbors.
+        use_knn: Passed to sc.pp.neighbors as knn=use_knn.
+            If True, builds a hard kNN graph (only k nearest neighbors).
+            If False, uses a Gaussian kernel to weight up to the k-th neighbor.
+        metric: Distance metric for kNN computation (e.g. "euclidean", "manhattan",
+            "correlation", etc.). If metric=="correlation" and the gene-expression
+            matrix is sparse, it will be converted to dense.
+        key: Prefix under which to store results in adata.uns. The function sets
+            adata.uns[f"{key}_gene_index"], adata.uns[f"{key}_connectivities"],
+            and adata.uns[f"{key}_distances"].
+
+    Returns:
+        None. Modifies ``adata`` in-place by adding to ``.uns``:
+            - ``'{key}_gene_index'``: list of gene names in the graph.
+            - ``'{key}_connectivities'``: sparse connectivity matrix (genes x genes).
+            - ``'{key}_distances'``: sparse distance matrix (genes x genes).
     """
     # 1) Work on a shallow copy so we don’t overwrite adata.X prematurely
     adata_work = adata.copy()
@@ -127,41 +123,34 @@ def find_gene_modules(
     order_genes_by_within_module_connectivity: bool = True,
     random_state: Optional[int] = 0,             # for reproducible Leiden
 ) -> Dict[str, List[str]]:
-    """
-    Find gene modules by building a kNN graph over genes (or cluster-mean profiles)
-    and clustering with Leiden.
+    """Find gene modules by building a kNN graph over genes (or cluster-mean profiles) and clustering with Leiden.
 
-    Writes a dict {f"{prefix}{cluster_id}": [gene names]} to `adata.uns[uns_key]`
+    Writes a dict {f"{prefix}{cluster_id}": [gene names]} to ``adata.uns[uns_key]``
     and returns the same dict.
 
-    Parameters
-    ----------
-    mean_cluster
-        If True, aggregate cells by `groupby` before building the gene kNN graph.
-    groupby
-        Column in adata.obs used for aggregation when `mean_cluster=True`.
-    mask_var
-        Boolean column in adata.var used to select a subset of genes. If None, use all genes.
-    knn
-        Number of neighbors for the kNN graph on genes.
-    leiden_resolution
-        Resolution for Leiden clustering.
-    prefix
-        Prefix for module names.
-    metric
-        Distance metric for kNN (e.g. 'euclidean', 'manhattan', 'cosine', 'correlation').
-        NOTE: If `metric=='correlation'` and the data are sparse, we densify for stability.
-    uns_key
-        Top-level .uns key to store the resulting dict of modules (default 'knn_modules').
-    layer
-        If provided, use `adata.layers[layer]` as expression, otherwise `adata.X`.
-        (Aggregation honors this choice.)
-    min_module_size
-        Remove modules smaller than this size after clustering.
-    order_genes_by_within_module_connectivity
-        If True, sort each module's genes by their within-module connectivity (descending).
-    random_state
-        Random seed passed to Leiden for reproducibility.
+    Args:
+        adata: AnnData object (cells x genes).
+        mean_cluster: If True, aggregate cells by ``groupby`` before building the gene kNN graph.
+        groupby: Column in adata.obs used for aggregation when ``mean_cluster=True``.
+        mask_var: Boolean column in adata.var used to select a subset of genes.
+            If None, use all genes.
+        knn: Number of neighbors for the kNN graph on genes.
+        leiden_resolution: Resolution for Leiden clustering.
+        prefix: Prefix for module names.
+        metric: Distance metric for kNN (e.g. 'euclidean', 'manhattan', 'cosine',
+            'correlation'). If ``metric=='correlation'`` and the data are sparse,
+            they are densified for stability.
+        uns_key: Top-level ``.uns`` key to store the resulting dict of modules.
+            Defaults to 'knn_modules'.
+        layer: If provided, use ``adata.layers[layer]`` as expression, otherwise
+            ``adata.X``. Aggregation honors this choice.
+        min_module_size: Remove modules smaller than this size after clustering.
+        order_genes_by_within_module_connectivity: If True, sort each module's genes
+            by their within-module connectivity (descending).
+        random_state: Random seed passed to Leiden for reproducibility.
+
+    Returns:
+        Dict mapping module names to lists of gene names.
     """
     # ----------------- 1) Choose expression matrix via a copy -----------------
     adata_subset = adata.copy()
@@ -311,38 +300,30 @@ def whoare_genes_neighbors(
     key: str = "gene",
     use: str = "connectivities"
 ):
-    """
-    Retrieve the top `n_neighbors` nearest genes to `gene`, using a precomputed gene–gene kNN graph
-    stored in adata.uns (as produced by build_gene_knn_graph).
+    """Retrieve the top nearest genes to a query gene from a precomputed gene-gene kNN graph.
 
-    This version handles both sparse‐CSR matrices and dense NumPy arrays in adata.uns.
+    Uses the kNN graph stored in adata.uns (as produced by :func:`build_gene_knn`).
+    Handles both sparse CSR matrices and dense NumPy arrays.
 
-    Parameters
-    ----------
-    adata
-        AnnData that has the following keys in adata.uns:
-          - adata.uns[f"{key}_gene_index"]      (np.ndarray of gene names, in order)
-          - adata.uns[f"{key}_connectivities"]  (CSR sparse matrix or dense ndarray)
-          - adata.uns[f"{key}_distances"]       (CSR sparse matrix or dense ndarray)
-    gene
-        Gene name (must appear in `adata.uns[f"{key}_gene_index"]`).
-    n_neighbors
-        Number of neighbors to return.
-    key
-        Prefix under which the kNN graph was stored. For example, if build_gene_knn_graph(...)
-        was called with `key="gene"`, the function will look for:
-          - adata.uns["gene_gene_index"]
-          - adata.uns["gene_connectivities"]
-          - adata.uns["gene_distances"]
-    use
-        One of {"connectivities", "distances"}.  
-        - If "connectivities", neighbors are ranked by descending connectivity weight.  
-        - If "distances", neighbors are ranked by ascending distance (only among nonzero entries).
+    Args:
+        adata: AnnData that has the following keys in adata.uns:
+            adata.uns[f"{key}_gene_index"] (np.ndarray of gene names, in order),
+            adata.uns[f"{key}_connectivities"] (CSR sparse matrix or dense ndarray),
+            and adata.uns[f"{key}_distances"] (CSR sparse matrix or dense ndarray).
+        gene: Gene name (must appear in adata.uns[f"{key}_gene_index"]).
+        n_neighbors: Number of neighbors to return.
+        key: Prefix under which the kNN graph was stored. For example, if
+            build_gene_knn(...) was called with key="gene", the function will
+            look for adata.uns["gene_gene_index"],
+            adata.uns["gene_connectivities"], and adata.uns["gene_distances"].
+        use: One of "connectivities" or "distances". If "connectivities",
+            neighbors are ranked by descending connectivity weight. If
+            "distances", neighbors are ranked by ascending distance (only
+            among nonzero entries).
 
-    Returns
-    -------
-    neighbors : List[str]
-        A list of gene names (length ≤ n_neighbors) that are closest to `gene`.
+    Returns:
+        List of gene names (length <= n_neighbors) that are closest to the
+        query gene.
     """
     if use not in ("connectivities", "distances"):
         raise ValueError("`use` must be either 'connectivities' or 'distances'.")
@@ -945,37 +926,29 @@ def correlate_module_scores_with_pcs(
 ) -> pd.DataFrame:
     """Quantify the association between a module score and individual PCs.
 
-    Parameters
-    ----------
-    adata
-        AnnData object containing PCs in ``adata.obsm`` and per-cell module scores.
-    score_key
-        Either the name of an ``adata.obs`` column holding module scores (e.g., the
-        output of :func:`score_gene_sets`) or an explicit array-like of shape
-        ``(n_cells,)``.
-    pca_key
-        Key of the embedding in ``adata.obsm`` to correlate against (defaults to
-        ``"X_pca"``).
-    variance_key
-        Optional ``adata.uns`` key that stores ``"variance_ratio"`` for the chosen
-        PCA run (defaults to ``"pca"`` when using ``sc.tl.pca``).
-    method
-        Correlation metric: ``"pearson"`` (default) or ``"spearman"``.
-    min_abs_corr
-        Absolute-correlation threshold used to flag PCs that strongly follow the
-        module score. Set to ``None`` to skip flagging.
-    drop_na
-        If ``True`` (default), silently drop cells with missing scores/PC values.
-        Otherwise raise when NaNs are detected.
-    sort
-        If ``True`` (default), sort the output by descending absolute correlation.
+    Args:
+        adata: AnnData object containing PCs in ``adata.obsm`` and per-cell
+            module scores.
+        score_key: Either the name of an ``adata.obs`` column holding module
+            scores (e.g., the output of :func:`score_gene_sets`) or an explicit
+            array-like of shape ``(n_cells,)``.
+        pca_key: Key of the embedding in ``adata.obsm`` to correlate against.
+            Defaults to ``"X_pca"``.
+        variance_key: Optional ``adata.uns`` key that stores ``"variance_ratio"``
+            for the chosen PCA run. Defaults to ``"pca"`` when using
+            ``sc.tl.pca``.
+        method: Correlation metric: ``"pearson"`` (default) or ``"spearman"``.
+        min_abs_corr: Absolute-correlation threshold used to flag PCs that
+            strongly follow the module score. Set to ``None`` to skip flagging.
+        drop_na: If ``True`` (default), silently drop cells with missing
+            scores/PC values. Otherwise raise when NaNs are detected.
+        sort: If ``True`` (default), sort the output by descending absolute
+            correlation.
 
-    Returns
-    -------
-    pandas.DataFrame
-        Table with one row per PC containing the correlation, absolute correlation,
-        two-sided p-value, variance ratio (when available), and a boolean flag
-        indicating whether the PC exceeds ``min_abs_corr``.
+    Returns:
+        A DataFrame with one row per PC containing the correlation, absolute
+        correlation, two-sided p-value, variance ratio (when available), and a
+        boolean flag indicating whether the PC exceeds ``min_abs_corr``.
     """
 
     if pca_key not in adata.obsm:

@@ -7,15 +7,16 @@ import csv
 from collections import defaultdict
 
 def create_gene_structure_dict_by_stage(file_path, stage):
-    """
-    Create a dictionary mapping structures to lists of genes expressed at a specific stage. Designed for parsing output from Jax Labs MGI data
-    
-    Parameters:
-        file_path (str): Path to the gene expression file.
-        stage (str or int): The Theiler Stage to filter the data.
-    
+    """Create a dictionary mapping structures to lists of genes expressed at a specific stage.
+
+    Designed for parsing output from Jax Labs MGI data.
+
+    Args:
+        file_path: Path to the gene expression file.
+        stage: The Theiler Stage to filter the data.
+
     Returns:
-        dict: A dictionary where keys are structures and values are lists of genes expressed in those structures.
+        A dictionary where keys are structures and values are lists of genes expressed in those structures.
     """
     structure_dict = defaultdict(set)  # Using a set to avoid duplicate gene symbols
     
@@ -33,8 +34,17 @@ def create_gene_structure_dict_by_stage(file_path, stage):
     return structure_dict
 
 def filter_genes_dict(gene_dict, x):
-    # Create a dictionary to keep track of gene occurrences
-    # useful to trim results of create_gene_structure_dict_by_stage
+    """Filter gene lists to remove genes appearing in more than x lists.
+
+    Useful to trim results of create_gene_structure_dict_by_stage.
+
+    Args:
+        gene_dict: Dictionary where keys are identifiers and values are lists of genes.
+        x: Maximum number of lists a gene can appear in to be retained.
+
+    Returns:
+        A new dictionary with the same keys but with genes filtered out that appear in more than x lists.
+    """
     gene_occurrences = {}
     
     # Count occurrences of each gene across all lists
@@ -55,18 +65,16 @@ def filter_genes_dict(gene_dict, x):
 
 
 def write_gmt(gene_list, filename, collection_name, prefix=""):
-    """
-    Write a .gmt file from a gene list.
+    """Write a .gmt file from a gene list.
 
-    Parameters:
-    gene_list: dict
-        Dictionary of gene sets (keys are gene set names, values are lists of genes).
-    filename: str
-        The name of the file to write to.
-    collection_name: str
-        The name of the gene set collection.
-    prefix: str, optional
-        A prefix to add to each gene set name.
+    Args:
+        gene_list: Dictionary of gene sets (keys are gene set names, values are lists of genes).
+        filename: The name of the file to write to.
+        collection_name: The name of the gene set collection.
+        prefix: A prefix to add to each gene set name. Defaults to "".
+
+    Returns:
+        None. Writes the GMT file to disk.
     """
     with open(filename, mode='w') as fo:
         for akey in gene_list:
@@ -106,20 +114,15 @@ def read_gmt(file_path: str) -> dict:
 
 
 def filter_gene_list(genelist, min_genes, max_genes=1e6):
-    """
-    Filter the gene lists in the provided dictionary based on their lengths.
+    """Filter the gene lists in the provided dictionary based on their lengths.
 
-    Parameters:
-    - genelist : dict
-        Dictionary with keys as identifiers and values as lists of genes.
-    - min_genes : int
-        Minimum number of genes a list should have.
-    - max_genes : int
-        Maximum number of genes a list should have.
+    Args:
+        genelist: Dictionary with keys as identifiers and values as lists of genes.
+        min_genes: Minimum number of genes a list should have.
+        max_genes: Maximum number of genes a list should have. Defaults to 1e6.
 
     Returns:
-    - dict
-        Filtered dictionary with lists that have a length between min_genes and max_genes (inclusive of min_genes and max_genes).
+        Filtered dictionary with lists that have a length between min_genes and max_genes (inclusive).
     """
     filtered_dict = {key: value for key, value in genelist.items() if min_genes <= len(value) <= max_genes}
     return filtered_dict
@@ -143,7 +146,14 @@ def ann_set_up(species: str = "mmusculus") -> pd.DataFrame:
 
 
 def annSetUp(species: str = "mmusculus") -> pd.DataFrame:
-    """Deprecated: Use ann_set_up instead."""
+    """Deprecated: Use :func:`ann_set_up` instead.
+
+    Args:
+        species: Species name for BioMart query. Defaults to "mmusculus".
+
+    Returns:
+        DataFrame with columns 'external_gene_name' and 'go_id'.
+    """
     warnings.warn(
         "annSetUp is deprecated, use ann_set_up instead",
         DeprecationWarning,
@@ -172,7 +182,15 @@ def get_genes_from_go(go_id, ann_list: pd.DataFrame) -> np.ndarray:
 
 
 def getGenesFromGO(GOID, annList: pd.DataFrame) -> np.ndarray:
-    """Deprecated: Use get_genes_from_go instead."""
+    """Deprecated: Use :func:`get_genes_from_go` instead.
+
+    Args:
+        GOID: GO term ID (string) or list of GO term IDs.
+        annList: DataFrame from ann_set_up with 'external_gene_name' and 'go_id' columns.
+
+    Returns:
+        Array of gene names associated with the GO term(s).
+    """
     warnings.warn(
         "getGenesFromGO is deprecated, use get_genes_from_go instead",
         DeprecationWarning,

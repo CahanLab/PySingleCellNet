@@ -14,17 +14,16 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.cluster.hierarchy import linkage, leaves_list
 
 def bar_compare_celltype_composition(adata1, adata2, celltype_col, min_delta, colors=None, metric="log_ratio"):
-    """
-    Compare cell type proportions between two AnnData objects and plot either log-ratio or differences for significant changes.
-    
-    Parameters:
+    """Compare cell type proportions between two AnnData objects and plot either log-ratio or differences for significant changes.
+
+    Args:
         adata1 (AnnData): First AnnData object.
         adata2 (AnnData): Second AnnData object.
         celltype_col (str): Column name in `.obs` indicating cell types.
         min_delta (float): Minimum absolute difference in percentages to include in the plot.
         colors (dict, optional): Dictionary with cell types as keys and colors as values for the bars.
-        metric (str, optional): "log_ratio" (default) or "difference" to specify which metric to plot.
-    
+        metric (str, optional): "log_ratio" or "difference" to specify which metric to plot. Defaults to "log_ratio".
+
     Returns:
         None: Displays the bar plot.
     """
@@ -118,9 +117,12 @@ def stackedbar_composition(
         include_legend (bool, optional): Whether to include a legend in the plot. Defaults to True.
         legend_rows (int, optional): The number of rows in the legend. Defaults to 10.
     
+    Returns:
+        matplotlib.axes.Axes or None: The axes object if `ax` was provided, otherwise None (displays the plot).
+
     Raises:
         ValueError: If the length of `labels` does not match the number of unique groups.
-    
+
     Examples:
         >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name')
         >>> fig, ax = plt.subplots()
@@ -129,19 +131,19 @@ def stackedbar_composition(
     # Ensure the groupby column exists in .obs
     if groupby not in adata.obs.columns:
         raise ValueError(f"The groupby column '{groupby}' does not exist in the .obs attribute.")
-    
+
     # Check if groupby column is categorical or not
     if pd.api.types.is_categorical_dtype(adata.obs[groupby]):
         unique_groups = adata.obs[groupby].cat.categories.to_list()
     else:
         unique_groups = adata.obs[groupby].unique().tolist()
-    
+
     # Extract unique groups and ensure labels are provided or create default ones
     if labels is None:
         labels = unique_groups
     elif len(labels) != len(unique_groups):
         raise ValueError("Length of 'labels' must match the number of unique groups.")
-    
+
     if color_dict is None:
         color_dict = adata.uns.get('SCN_class_colors', {})
     
@@ -241,9 +243,12 @@ def stackedbar_composition3(
         similarity_metric (str, optional): The metric to use for similarity ordering. Defaults to 'correlation'.
         include_legend (bool, optional): Whether to include a legend in the plot. Defaults to True.
     
+    Returns:
+        matplotlib.axes.Axes or None: The axes object if `ax` was provided, otherwise None (displays the plot).
+
     Raises:
         ValueError: If the length of `labels` does not match the number of unique groups.
-    
+
     Examples:
         >>> stackedbar_composition(adata, groupby='sample', obs_column='your_column_name')
         >>> fig, ax = plt.subplots()
@@ -252,19 +257,19 @@ def stackedbar_composition3(
     # Ensure the groupby column exists in .obs
     if groupby not in adata.obs.columns:
         raise ValueError(f"The groupby column '{groupby}' does not exist in the .obs attribute.")
-    
+
     # Check if groupby column is categorical or not
     if pd.api.types.is_categorical_dtype(adata.obs[groupby]):
         unique_groups = adata.obs[groupby].cat.categories.to_list()
     else:
         unique_groups = adata.obs[groupby].unique().tolist()
-    
+
     # Extract unique groups and ensure labels are provided or create default ones
     if labels is None:
         labels = unique_groups
     elif len(labels) != len(unique_groups):
         raise ValueError("Length of 'labels' must match the number of unique groups.")
-    
+
     if color_dict is None:
         color_dict = adata.uns.get('SCN_class_colors', {})
     
@@ -358,13 +363,16 @@ def stackedbar_composition_list(
         color_dict (Dict[str, str], optional): A dictionary mapping categories to specific colors. If not provided,
             default colors will be used.
 
+    Returns:
+        matplotlib.figure.Figure: The generated figure object.
+
     Raises:
         ValueError: If the length of `labels` does not match the number of AnnData objects.
 
     Examples:
         >>> plot_cell_type_proportions([adata1, adata2], obs_column='your_column_name', labels=['Sample 1', 'Sample 2'])
     """
-    
+
     # Ensure labels are provided, or create default ones
     if labels is None:
         labels = [f'AnnData {i+1}' for i in range(len(adata_list))]
@@ -443,6 +451,22 @@ def stackedbar_categories(
     show_pct_total = False,
     legend_loc = "best"
 ):
+    """Plot horizontal stacked bar chart of SCN classification categories per cell type.
+
+    Args:
+        adata (AnnData): An AnnData object containing SCN classification results.
+        scn_classes_to_display (list, optional): Subset of SCN classes to include. Defaults to None (all classes).
+        bar_height (float, optional): Height of the horizontal bars. Defaults to 0.8.
+        color_dict (dict, optional): Dictionary mapping category names to colors. Defaults to None (uses SCN_CATEGORY_COLOR_DICT).
+        class_col_name (str, optional): Column name in `.obs` for the cell type labels. Defaults to 'SCN_class_argmax'.
+        category_col_name (str, optional): Column name in `.obs` for the SCN category labels. Defaults to 'SCN_class_type'.
+        title (str, optional): Title for the plot. Defaults to None ('Cell typing categorization').
+        show_pct_total (bool, optional): Whether to display count and percentage text inside bars. Defaults to False.
+        legend_loc (str, optional): Location of the legend. Defaults to "best".
+
+    Returns:
+        matplotlib.figure.Figure: The generated figure object.
+    """
     # Copy the obs DataFrame to avoid modifying the original data
     df = adata.obs.copy()
     
@@ -527,6 +551,23 @@ def stackedbar_categories_list(
     show_pct_total = False,
     legend_loc = "outside center right"
 ):
+    """Plot side-by-side horizontal stacked bar charts of SCN categories for multiple AnnData objects.
+
+    Args:
+        ads (list[AnnData]): List of AnnData objects to plot.
+        titles (list[str], optional): Titles for each subplot. Defaults to None ('SCN Class Proportions' for each).
+        scn_classes_to_display (list, optional): Subset of SCN classes to include. Defaults to None (all classes).
+        bar_height (float, optional): Height of the horizontal bars. Defaults to 0.8.
+        bar_groups_obsname (str, optional): Column name in `.obs` for the cell type groups. Defaults to 'SCN_class_argmax'.
+        bar_subgroups_obsname (str, optional): Column name in `.obs` for the SCN category subgroups. Defaults to 'SCN_class_type'.
+        ncell_min (int, optional): Minimum number of cells required to display a class. Defaults to None.
+        color_dict (dict, optional): Dictionary mapping category names to colors. Defaults to None (uses SCN_CATEGORY_COLOR_DICT).
+        show_pct_total (bool, optional): Whether to display count and percentage text inside bars. Defaults to False.
+        legend_loc (str, optional): Location of the legend. Defaults to "outside center right".
+
+    Returns:
+        matplotlib.figure.Figure: The generated figure object.
+    """
     dfs = [adata.obs for adata in ads]
     num_dfs = len(dfs)
     
@@ -644,7 +685,8 @@ def bar_classifier_f1(adata: AnnData, ground_truth: str = "celltype", class_pred
     })
     
     # Get colors from the .uns dictionary
-    f1_scores_df['Color'] = f1_scores_df['Class'].map(adata.uns['SCN_class_colors'])
+    color_key = 'SCN_class_colors' if 'SCN_class_colors' in adata.uns else 'SCN_class_argmax_colors'
+    f1_scores_df['Color'] = f1_scores_df['Class'].map(adata.uns[color_key])
 
     plt.rcParams['figure.constrained_layout.use'] = True
     # sns.set_theme(style="whitegrid")

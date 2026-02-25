@@ -181,13 +181,15 @@ def comp_ct_thresh(adata_c: AnnData, qTile: int = 0.05, obs_name='SCN_class_argm
         scnScores = adata_c.obsm["SCN_score"].copy()
 
         cts = scnScores.columns.drop('rand')
-        thrs = pd.DataFrame(np.repeat(0, len(cts)), index=cts)
+        thrs = pd.DataFrame(np.zeros(len(cts)), index=cts)
 
         for ct in cts:
-            # print(ct)
             templocs = sampTab[sampTab[obs_name] == ct].index
             tempscores = scnScores.loc[templocs, ct]
-            thrs.loc[ct, 0] = np.quantile(tempscores, q=qTile)
+            if len(tempscores) == 0:
+                thrs.loc[ct, 0] = 0.0
+            else:
+                thrs.loc[ct, 0] = np.quantile(tempscores, q=qTile)
     
         return thrs
 
