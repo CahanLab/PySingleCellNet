@@ -16,6 +16,36 @@ from sklearn.mixture import GaussianMixture
 if TYPE_CHECKING:  # for type hints without circular import
     from ..string_io.api import StringEnv
 
+
+# ---------- simple, dependency-free p-value adjuster ----------
+def _p_adjust(p: np.ndarray, method: str = "fdr_bh") -> np.ndarray:
+    """Benjamini-Hochberg (or Bonferroni/Holm) p-value adjustment."""
+    p = np.asarray(p, dtype=float)
+    m = p.size
+    if m == 0:
+        return p
+    if method == "bonferroni":
+        return np.minimum(1.0, p * m)
+    if method == "holm":
+        order = np.argsort(p)
+        adj = np.empty_like(p)
+        for rank, i in enumerate(order, start=1):
+            adj[i] = (m - rank + 1) * p[i]
+        adj_sorted = adj[order]
+        adj_sorted = np.maximum.accumulate(adj_sorted[::-1])[::-1]
+        adj[order] = np.minimum(1.0, adj_sorted)
+        return adj
+    # Benjamini–Hochberg
+    order = np.argsort(p)
+    p_sorted = p[order]
+    ranks = np.arange(1, m + 1, dtype=float)
+    q_sorted = p_sorted * m / ranks
+    q_sorted = np.minimum.accumulate(q_sorted[::-1])[::-1]
+    q = np.empty_like(q_sorted)
+    q[order] = np.minimum(1.0, q_sorted)
+    return q
+
+
 def build_gene_knn(
     adata,
     mask_var: str = None,
@@ -109,14 +139,13 @@ def build_gene_knn(
 def find_gene_modules(
     adata,
     mean_cluster: bool = True,
-    groupby: str = 'leiden',
+    groupby: Optional[str] = None,
     mask_var: Optional[str] = None,
     knn: int = 5,
     leiden_resolution: float = 0.5,
     prefix: str = 'gmod_',
     metric: str = 'euclidean',
     *,
-    # NEW:
     uns_key: str = 'knn_modules',                # where to store the dict of modules
     layer: Optional[str] = None,                 # use adata.layers[layer] instead of .X
     min_module_size: int = 2,                    # drop tiny modules (set to 1 to keep all)
@@ -132,6 +161,7 @@ def find_gene_modules(
         adata: AnnData object (cells x genes).
         mean_cluster: If True, aggregate cells by ``groupby`` before building the gene kNN graph.
         groupby: Column in adata.obs used for aggregation when ``mean_cluster=True``.
+            Required when ``mean_cluster=True``. Defaults to ``'leiden'`` in that case.
         mask_var: Boolean column in adata.var used to select a subset of genes.
             If None, use all genes.
         knn: Number of neighbors for the kNN graph on genes.
@@ -170,6 +200,8 @@ def find_gene_modules(
 
     # ----------------- 3) Optional per-cluster aggregation -----------------
     if mean_cluster:
+        if groupby is None:
+            groupby = 'leiden'
         if groupby not in adata_subset.obs.columns:
             raise ValueError(f"Column '{groupby}' not found in adata.obs.")
         # Prefer Scanpy's aggregation helper if available (Scanpy ≥1.10):
@@ -947,8 +979,9 @@ def correlate_module_scores_with_pcs(
 
     Returns:
         A DataFrame with one row per PC containing the correlation, absolute
-        correlation, two-sided p-value, variance ratio (when available), and a
-        boolean flag indicating whether the PC exceeds ``min_abs_corr``.
+        correlation, two-sided p-value, FDR-adjusted p-value (Benjamini-Hochberg),
+        variance ratio (when available), impact score (correlation² × variance_ratio),
+        and a boolean flag indicating whether the PC exceeds ``min_abs_corr``.
     """
 
     if pca_key not in adata.obsm:
@@ -1033,13 +1066,21 @@ def correlate_module_scores_with_pcs(
             if vr.size:
                 var_ratio[: min(n_pcs, vr.size)] = vr[:n_pcs]
 
+    # FDR correction
+    fdr = _p_adjust(p_values, method="fdr_bh")
+
+    # Impact score: correlation² × variance_ratio
+    impact_score = corr ** 2 * var_ratio
+
     result = pd.DataFrame({
         "pc": [f"PC{i}" for i in range(1, n_pcs + 1)],
         "pc_index": np.arange(1, n_pcs + 1, dtype=int),
         "correlation": corr,
         "abs_correlation": np.abs(corr),
         "p_value": p_values,
+        "fdr": fdr,
         "variance_ratio": var_ratio,
+        "impact_score": impact_score,
         "n_cells": n_valid,
         "score_key": score_label or "array",
     })
@@ -1055,3 +1096,99 @@ def correlate_module_scores_with_pcs(
         result = result.sort_values("abs_correlation", ascending=False).reset_index(drop=True)
 
     return result
+
+
+def suggest_pcs_to_drop(
+    adata: AnnData,
+    genes: Sequence[str],
+    *,
+    set_name: str = "confounder",
+    layer: Optional[str] = None,
+    rank_method: Optional[str] = None,
+    pca_key: str = "X_pca",
+    variance_key: Optional[str] = "pca",
+    corr_method: str = "pearson",
+    fdr_threshold: float = 0.05,
+    min_abs_corr: float = 0.3,
+    min_impact_score: Optional[float] = None,
+    case_insensitive: bool = False,
+    verbose: bool = True,
+) -> Tuple[List[int], pd.DataFrame]:
+    """Identify PCs driven by a confounder gene list (e.g., cell-cycle genes).
+
+    Pipeline: score cells for the gene list via :func:`score_gene_sets`,
+    correlate scores with PCs via :func:`correlate_module_scores_with_pcs`,
+    then apply FDR, absolute-correlation, and optional impact-score thresholds
+    to select PCs for removal.
+
+    Args:
+        adata: AnnData object with PCA results in ``adata.obsm[pca_key]``.
+        genes: List of confounder gene names (e.g., cell-cycle genes).
+        set_name: Name used for the gene set when scoring. Defaults to
+            ``"confounder"``.
+        layer: Expression layer to use for scoring (None = ``.X``).
+        rank_method: Scoring method forwarded to :func:`score_gene_sets`.
+            ``None`` for value-based, ``"auc"`` or ``"ucell"`` for rank-based.
+        pca_key: Key in ``adata.obsm`` holding the PCA embedding.
+        variance_key: ``adata.uns`` key with ``"variance_ratio"`` metadata.
+        corr_method: ``"pearson"`` or ``"spearman"``.
+        fdr_threshold: Maximum FDR for a PC to be flagged. Defaults to 0.05.
+        min_abs_corr: Minimum absolute correlation for a PC to be flagged.
+            Defaults to 0.3.
+        min_impact_score: If not None, also require
+            ``impact_score >= min_impact_score`` (correlation² × variance_ratio).
+        case_insensitive: Case-insensitive gene name matching.
+        verbose: If True, print a summary of flagged PCs.
+
+    Returns:
+        A tuple ``(pc_indices, diagnostic_df)`` where ``pc_indices`` is a list
+        of 1-indexed PC numbers recommended for removal, and ``diagnostic_df``
+        is the full correlation DataFrame from
+        :func:`correlate_module_scores_with_pcs` (including ``fdr`` and
+        ``impact_score`` columns).
+    """
+    # Score cells
+    gene_dict = {set_name: list(genes)}
+    scores_df = score_gene_sets(
+        adata,
+        gene_dict,
+        layer=layer,
+        rank_method=rank_method,
+        case_insensitive=case_insensitive,
+        return_dataframe=True,
+    )
+    score_vec = scores_df[set_name].values
+
+    # Correlate with PCs
+    diag = correlate_module_scores_with_pcs(
+        adata,
+        score_vec,
+        pca_key=pca_key,
+        variance_key=variance_key,
+        method=corr_method,
+        min_abs_corr=min_abs_corr,
+        sort=True,
+    )
+
+    # Apply thresholds
+    mask = (diag["fdr"] < fdr_threshold) & (diag["abs_correlation"] >= min_abs_corr)
+    if min_impact_score is not None:
+        mask = mask & (diag["impact_score"] >= min_impact_score)
+
+    flagged = diag.loc[mask]
+    pc_indices = sorted(flagged["pc_index"].tolist())
+
+    if verbose:
+        n_genes_present = int((scores_df[set_name].notna()).sum())
+        print(f"suggest_pcs_to_drop: scored {n_genes_present} cells with "
+              f"'{set_name}' gene set")
+        if pc_indices:
+            pcs_str = ", ".join(f"PC{i}" for i in pc_indices)
+            print(f"  -> flagged {len(pc_indices)} PC(s) for removal: {pcs_str}")
+            print(f"     (FDR < {fdr_threshold}, |r| >= {min_abs_corr}"
+                  + (f", impact >= {min_impact_score}" if min_impact_score is not None else "")
+                  + ")")
+        else:
+            print("  -> no PCs met the removal criteria")
+
+    return pc_indices, diag

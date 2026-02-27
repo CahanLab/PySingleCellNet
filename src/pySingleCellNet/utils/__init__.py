@@ -12,7 +12,8 @@ from .adataTools import (
     remove_genes,
     filter_anndata_slots,
     filter_adata_by_group_size,
-    drop_pcs_from_embedding
+    drop_pcs_from_embedding,
+    remove_confounder_pcs
 )
 
 
@@ -54,6 +55,7 @@ __all__ = [
     "filter_anndata_slots",
     "filter_adata_by_group_size",
     "drop_pcs_from_embedding",
+    "remove_confounder_pcs",
     "create_gene_structure_dict_by_stage",
     "filter_genes_dict",
     "write_gmt",

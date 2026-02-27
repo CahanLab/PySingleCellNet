@@ -37,7 +37,9 @@ from .gene import (
     whoare_genes_neighbors,
     what_module_has_gene,
     score_gene_sets,
-    correlate_module_scores_with_pcs
+    correlate_module_scores_with_pcs,
+    subset_modules_top_genes,
+    suggest_pcs_to_drop
 )
 
 from .rank_class import (
@@ -68,6 +70,8 @@ __all__ = [
     "what_module_has_gene",
     "score_gene_sets",
     "correlate_module_scores_with_pcs",
+    "subset_modules_top_genes",
+    "suggest_pcs_to_drop",
     "find_sig_genes",
     "findSigGenes",
 ]

@@ -64,7 +64,7 @@ nav:
     - 'Quickstart': notebooks/quickstart.ipynb
     - 'Explore': notebooks/categorize.ipynb
     - 'Clustering cells': notebooks/cluster_alot.ipynb
-#    - 'Clustering genes': notebooks/gene_modules.ipynb
+    - 'Gene modules': notebooks/gene_modules.ipynb
 #    - 'train & classify': 'notebooks/Basics.ipynb'
 #    - 'analyze _in vitro_ cells': 'notebooks/explore.ipynb'
 #    - 'prepare training data': 'notebooks/how-to_prepare_reference_data.ipynb'

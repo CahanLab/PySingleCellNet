@@ -298,6 +298,92 @@ def drop_pcs_from_embedding(
     }
 
 
+def remove_confounder_pcs(
+    adata: ad.AnnData,
+    genes: Sequence[str],
+    *,
+    set_name: str = "confounder",
+    layer: Optional[str] = None,
+    rank_method: Optional[str] = None,
+    pca_key: str = "X_pca",
+    variance_key: Optional[str] = "pca",
+    corr_method: str = "pearson",
+    fdr_threshold: float = 0.05,
+    min_abs_corr: float = 0.3,
+    min_impact_score: Optional[float] = None,
+    case_insensitive: bool = False,
+    base_varm_key: str = "PCs",
+    new_suffix: Optional[str] = None,
+    verbose: bool = True,
+) -> Tuple[Dict[str, str], pd.DataFrame]:
+    """Identify and remove confounder-associated PCs in one call.
+
+    Convenience wrapper that calls :func:`~pySingleCellNet.tools.gene.suggest_pcs_to_drop`
+    to flag PCs, then :func:`drop_pcs_from_embedding` to create new PCA slots
+    with those PCs removed.
+
+    Args:
+        adata: AnnData object with PCA results.
+        genes: Confounder gene names (e.g., cell-cycle genes).
+        set_name: Name for the gene set when scoring.
+        layer: Expression layer for scoring (None = ``.X``).
+        rank_method: Scoring method (None, ``"auc"``, or ``"ucell"``).
+        pca_key: Key in ``adata.obsm`` for the PCA embedding.
+        variance_key: ``adata.uns`` key with variance ratio metadata.
+        corr_method: ``"pearson"`` or ``"spearman"``.
+        fdr_threshold: FDR cutoff for flagging PCs.
+        min_abs_corr: Minimum absolute correlation for flagging PCs.
+        min_impact_score: Optional minimum impact score threshold.
+        case_insensitive: Case-insensitive gene matching.
+        base_varm_key: ``adata.varm`` key with per-gene loadings.
+        new_suffix: Suffix for the new embedding keys (auto-generated if None).
+        verbose: Print summary of flagged PCs.
+
+    Returns:
+        A tuple ``(new_keys_dict, diagnostic_df)`` where ``new_keys_dict`` is
+        the dict returned by :func:`drop_pcs_from_embedding` describing the
+        new slots created, and ``diagnostic_df`` is the full correlation
+        DataFrame. If no PCs are flagged, ``new_keys_dict`` is empty.
+
+    Raises:
+        ValueError: If PCA results are missing from ``adata``.
+    """
+    from ..tools.gene import suggest_pcs_to_drop  # local import to avoid circular dependency
+
+    pc_indices, diag = suggest_pcs_to_drop(
+        adata,
+        genes,
+        set_name=set_name,
+        layer=layer,
+        rank_method=rank_method,
+        pca_key=pca_key,
+        variance_key=variance_key,
+        corr_method=corr_method,
+        fdr_threshold=fdr_threshold,
+        min_abs_corr=min_abs_corr,
+        min_impact_score=min_impact_score,
+        case_insensitive=case_insensitive,
+        verbose=verbose,
+    )
+
+    if not pc_indices:
+        if verbose:
+            print("remove_confounder_pcs: no PCs to remove; adata unchanged.")
+        return {}, diag
+
+    new_keys = drop_pcs_from_embedding(
+        adata,
+        pc_indices,
+        base_obsm_key=pca_key,
+        pca_uns_key=variance_key or "pca",
+        base_varm_key=base_varm_key,
+        new_suffix=new_suffix,
+        assume_one_indexed=True,
+    )
+
+    return new_keys, diag
+
+
 def filter_anndata_slots(
     adata,
     slots_to_keep: Dict[str, Optional[List[str]]],
