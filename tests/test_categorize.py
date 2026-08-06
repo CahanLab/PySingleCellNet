@@ -1,9 +1,41 @@
 """Tests for the categorize pipeline."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
 import scanpy as sc
+
+
+def _warnings_mentioning(recorded, needle):
+    """Messages among `recorded` that mention `needle`."""
+    return [str(w.message) for w in recorded if needle in str(w.message)]
+
+
+def test_comp_ct_thresh_uses_no_deprecated_anndata_api(classified_query):
+    """comp_ct_thresh must not call anndata's deprecated obsm_keys()."""
+    from pySingleCellNet.tools.categorize import comp_ct_thresh
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        comp_ct_thresh(classified_query)
+
+    assert _warnings_mentioning(recorded, "obsm_keys") == []
+
+
+def test_categorize_uses_no_deprecated_igraph_api(classified_query, trained_classifier):
+    """categorize_classification must not call igraph's deprecated shortest_paths()."""
+    from pySingleCellNet.tools.categorize import categorize_classification, comp_ct_thresh
+
+    ad = classified_query.copy()
+    thresholds = comp_ct_thresh(ad)
+
+    with warnings.catch_warnings(record=True) as recorded:
+        warnings.simplefilter("always")
+        categorize_classification(ad, thresholds=thresholds, clf=trained_classifier)
+
+    assert _warnings_mentioning(recorded, "shortest_paths") == []
 
 
 def test_comp_ct_thresh(classified_query):

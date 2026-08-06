@@ -133,7 +133,7 @@ def categorize_classification(
                     return False
                 idx1 = type2index[ct1]
                 idx2 = type2index[ct2]
-                dist = graph.shortest_paths(idx1, idx2)[0][0]
+                dist = graph.distances(idx1, idx2)[0][0]
                 if dist >= k:
                     return False
         return True
@@ -191,7 +191,7 @@ def comp_ct_thresh(adata_c: AnnData, qTile: int = 0.05, obs_name='SCN_class_argm
         (excluding 'rand') and contains the computed quantile threshold.
         Returns None if 'SCN_score' is not present in `adata_c.obsm`.
     """
-    if "SCN_score" not in adata_c.obsm_keys():
+    if "SCN_score" not in adata_c.obsm:
         print("No .obsm['SCN_score'] was found in the AnnData provided. You may need to run PySingleCellNet.scn_classify()")
         return
     else:
