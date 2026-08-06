@@ -11,8 +11,12 @@ prediction.
 import os
 import pickle
 import warnings
+from typing import Union
 
 import numpy as np
+
+#: Anything acceptable as a filesystem path.
+PathLike = Union[str, "os.PathLike"]
 
 #: Current on-disk layout for a pickled classifier.
 #:
@@ -187,12 +191,12 @@ def _migrate_classifier(payload: dict) -> dict:
     return migrated
 
 
-def save_classifier(clf: dict, filepath) -> None:
+def save_classifier(clf: dict, filepath: PathLike) -> None:
     """Write a trained classifier to disk with its format version recorded.
 
     Args:
         clf (dict): A classifier as returned by `tl.train_classifier`.
-        filepath: Destination path (str or os.PathLike).
+        filepath (str or os.PathLike): Destination path.
 
     Returns:
         None. Writes `filepath`.
@@ -214,12 +218,13 @@ def save_classifier(clf: dict, filepath) -> None:
         pickle.dump(payload, handle)
 
 
-def load_classifier(filepath) -> dict:
+def load_classifier(filepath: PathLike) -> dict:
     """Read a classifier from disk, validating and migrating it.
 
     Args:
-        filepath: Path to a file written by `save_classifier`, or a
-            hand-pickled classifier dict from before versioning existed.
+        filepath (str or os.PathLike): Path to a file written by
+            `save_classifier`, or a hand-pickled classifier dict from before
+            versioning existed.
 
     Returns:
         dict: The classifier, stamped with the current format version.

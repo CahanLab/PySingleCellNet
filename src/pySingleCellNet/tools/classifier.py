@@ -561,7 +561,7 @@ def classify_anndata(
     rf_tsp,
     nrand: int = 0,
     min_gene_overlap: float = DEFAULT_MIN_GENE_OVERLAP,
-):
+) -> None:
     """Classifies cells in the `adata` object based on the given gene expression and cross-pair information using a
     random forest classifier in rf_tsp trained with the provided xpairs genes.
 
@@ -573,7 +573,7 @@ def classify_anndata(
 
     Args:
         adata: An annotated data matrix containing the gene expression information for cells.
-        rf_tsp: A list of random forest classifier parameters used for classification.
+        rf_tsp (dict): A trained classifier from `tl.train_classifier`.
         nrand: Number of randomized profiles to score as a null distribution.
             Default is 0. When positive, the scored profiles are stored in
             `.uns['SCN_random_scores']` rather than mixed into the per-cell result.
@@ -582,10 +582,7 @@ def classify_anndata(
             0.0 to disable the check and keep only the warning.
 
     Returns:
-        None. Modifies adata in-place, adding `.obsm['SCN_score']`,
-        `.obs['SCN_class_argmax']`, `.uns['SCN_class_argmax_colors']`,
-        `.uns['SCN_gene_overlap']` and, when `nrand` > 0,
-        `.uns['SCN_random_scores']`.
+        None: Modifies adata in-place, adding `.obsm['SCN_score']`, `.obs['SCN_class_argmax']`, `.uns['SCN_class_argmax_colors']`, `.uns['SCN_gene_overlap']` and, when `nrand` > 0, `.uns['SCN_random_scores']`.
 
     Raises:
         ValueError: If `nrand` is negative, or if the fraction of classifier
