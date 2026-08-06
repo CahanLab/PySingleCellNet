@@ -11,6 +11,7 @@ tl.score_gene_sets should add scores, one matrix to .obsm and not as columsn to 
 ### Added
 - `tl.suggest_pcs_to_drop`: automatically identify PCs driven by a confounder gene list (e.g., cell-cycle genes) using FDR, correlation, and impact-score thresholds
 - `ut.remove_confounder_pcs`: convenience wrapper that flags and removes confounder PCs in one call
+- Confounder PC removal tutorial notebook (`docs/notebooks/confounder_pcs.ipynb`)
 - `requirements.txt` and `environment.yml` for reproducible environment setup
 - Installation instructions in `docs/install.md` for pip and conda workflows
 - Test suite (`tests/`) covering classifier, clustering, categorize, utils, and plotting

@@ -9,6 +9,7 @@ build/
 dist/
 pySingleCellNet.egg-info/
 __pycache__/
+.ipynb_checkpoints/
 site/
 _version.py
 tests/data/*.h5ad
