@@ -28,6 +28,10 @@ tl.score_gene_sets should add scores, one matrix to .obsm and not as columsn to 
 
 ### Fixed
 
+- `tl.classify_anndata`: classifier genes absent from the query were silently zero-filled, collapsing every pair feature that used them while the scores still looked healthy. Overlap is now reported in `.uns['SCN_gene_overlap']`, a warning names the missing symbols, and scoring is refused below `min_gene_overlap` (default 0.05). A species/symbol-case mismatch (e.g. `ACTB` vs `Actb`) is called out explicitly.
+- `tl.classify_anndata`: `nrand > 0` raised `ValueError: value.index does not match parent's obs names` because the randomized profiles were concatenated into the per-cell result. The null distribution now goes to `.uns['SCN_random_scores']`. Negative `nrand` raises.
+- `tl.classify_anndata`: the whole query was densified before being subset to the classifier's genes (~24 GB for a 100k x 30k query to reach a ~0.2 GB matrix). Columns are now sliced before densification, so peak memory scales with the classifier's gene set.
+- `tl.train_classifier`: no longer leaves a global `warnings.filterwarnings('ignore')` in place, which had muted every warning for the rest of the session — including the new gene-overlap warning.
 - tl.cluster_subclusters calls sc.pp.pca with mask_var instead of use_highly_variable
 - `tl.train_classifier`: `n_rand` auto-calculation now returns `int` instead of `np.float64` (fixes pandas iloc error)
 - `tl.comp_ct_thresh`: handle cell types with no classified cells (empty array in `np.quantile`)

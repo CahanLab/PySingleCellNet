@@ -5,7 +5,7 @@ import anndata
 from anndata import AnnData
 from typing import List, Dict
 from sklearn.ensemble import RandomForestClassifier
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, issparse
 import warnings
 import matplotlib.pyplot as plt
 from alive_progress import alive_bar
@@ -431,21 +431,153 @@ def _sc_makeClassifier(
     ## #### ## return [expT.loc[:, ggenes], ggroups]
     return clf
 
-def classify_anndata(adata: AnnData, rf_tsp, nrand: int = 0):
+#: Fraction of the classifier's genes that must be present in a query before
+#: `classify_anndata` will score it. Chosen to catch the species / symbol-case
+#: mismatch (which yields near-zero overlap) without tripping on queries that
+#: are merely filtered more aggressively than the reference.
+DEFAULT_MIN_GENE_OVERLAP = 0.05
+
+
+def _compute_gene_overlap(query_genes, classifier_genes) -> dict:
+    """Summarize how much of a classifier's gene set a query actually provides.
+
+    Args:
+        query_genes: Iterable of gene symbols available in the query.
+        classifier_genes: Iterable of gene symbols the classifier requires
+            (i.e. ``rf_tsp['tpGeneArray']``).
+
+    Returns:
+        dict: Keys ``n_required``, ``n_present``, ``n_missing``, ``fraction``
+        (present / required, 1.0 when nothing is required) and ``missing_genes``
+        (sorted list of the absent symbols).
+    """
+    required = list(dict.fromkeys(str(g) for g in classifier_genes))
+    available = {str(g) for g in query_genes}
+    missing = [g for g in required if g not in available]
+
+    n_required = len(required)
+    n_missing = len(missing)
+    n_present = n_required - n_missing
+    return {
+        'n_required': n_required,
+        'n_present': n_present,
+        'n_missing': n_missing,
+        'fraction': (n_present / n_required) if n_required else 1.0,
+        'missing_genes': sorted(missing),
+    }
+
+
+def _case_insensitive_rescue_count(query_genes, missing_genes) -> int:
+    """Number of missing symbols that would match if symbol case were ignored.
+
+    Used only to make the "you trained on mouse and are querying human" error
+    message actionable instead of merely reporting 0% overlap.
+    """
+    folded = {str(g).casefold() for g in query_genes}
+    return sum(1 for g in missing_genes if str(g).casefold() in folded)
+
+
+def _check_gene_overlap(overlap: dict, query_genes, min_gene_overlap: float) -> None:
+    """Warn about absent classifier genes, and raise when too few remain.
+
+    Args:
+        overlap: Result of `_compute_gene_overlap`.
+        query_genes: Iterable of the query's gene symbols, used to detect a
+            symbol-case mismatch.
+        min_gene_overlap: Minimum acceptable present/required fraction. Use 0.0
+            to disable the check and keep only the warning.
+
+    Raises:
+        ValueError: If the overlap fraction is below `min_gene_overlap`.
+    """
+    if overlap['n_missing'] == 0:
+        return
+
+    n_missing = overlap['n_missing']
+    n_required = overlap['n_required']
+    fraction = overlap['fraction']
+
+    preview = ', '.join(overlap['missing_genes'][:10])
+    if n_missing > 10:
+        preview += f", ... (+{n_missing - 10} more)"
+
+    hint = ""
+    n_rescued = _case_insensitive_rescue_count(query_genes, overlap['missing_genes'])
+    if n_rescued > 0:
+        hint = (
+            f" {n_rescued} of them match query genes when symbol case is ignored, "
+            "which usually means the classifier and query use different species or "
+            "symbol conventions (e.g. ACTB vs Actb)."
+        )
+
+    if fraction < min_gene_overlap:
+        raise ValueError(
+            f"Insufficient gene overlap: only {overlap['n_present']}/{n_required} "
+            f"({fraction:.1%}) of the classifier's genes are present in the query, "
+            f"below the required minimum of {min_gene_overlap:.1%}.{hint} "
+            f"Missing: {preview}. "
+            "Pass min_gene_overlap=0 to score anyway (absent genes are treated as zero)."
+        )
+
+    warnings.warn(
+        f"{n_missing}/{n_required} classifier genes are absent from the query "
+        f"({fraction:.1%} overlap). Absent genes are treated as zero expression, so "
+        f"every gene pair involving them is constant and the resulting scores may be "
+        f"unreliable.{hint} Missing: {preview}.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
+def classify_anndata(
+    adata: AnnData,
+    rf_tsp,
+    nrand: int = 0,
+    min_gene_overlap: float = DEFAULT_MIN_GENE_OVERLAP,
+):
     """Classifies cells in the `adata` object based on the given gene expression and cross-pair information using a
     random forest classifier in rf_tsp trained with the provided xpairs genes.
+
+    Classifier genes that are absent from `adata` are treated as zero expression.
+    Because that silently degrades the scores, the overlap is reported in
+    `adata.uns['SCN_gene_overlap']`, a warning is raised whenever any gene is
+    missing, and scoring is refused outright when the overlap falls below
+    `min_gene_overlap`.
 
     Args:
         adata: An annotated data matrix containing the gene expression information for cells.
         rf_tsp: A list of random forest classifier parameters used for classification.
-        nrand: Number of random permutations for the null distribution. Default is 0.
+        nrand: Number of randomized profiles to score as a null distribution.
+            Default is 0. When positive, the scored profiles are stored in
+            `.uns['SCN_random_scores']` rather than mixed into the per-cell result.
+        min_gene_overlap: Minimum fraction of the classifier's genes that must be
+            present in `adata` before scoring proceeds. Defaults to 0.05. Set to
+            0.0 to disable the check and keep only the warning.
 
     Returns:
-        Updates adata with classification results.
+        None. Modifies adata in-place, adding `.obsm['SCN_score']`,
+        `.obs['SCN_class_argmax']`, `.uns['SCN_class_argmax_colors']`,
+        `.uns['SCN_gene_overlap']` and, when `nrand` > 0,
+        `.uns['SCN_random_scores']`.
+
+    Raises:
+        ValueError: If `nrand` is negative, or if the fraction of classifier
+            genes present in `adata` is below `min_gene_overlap`.
     """
 
+    if nrand < 0:
+        raise ValueError(f"nrand must be >= 0, got {nrand}.")
+
+    overlap = _compute_gene_overlap(adata.var_names, rf_tsp['tpGeneArray'])
+    _check_gene_overlap(overlap, adata.var_names, min_gene_overlap)
+
     # Classify cells using the `_scn_predict` function
-    classRes = _scn_predict(rf_tsp, adata, nrand=nrand)
+    classRes, randRes = _scn_predict(rf_tsp, adata, nrand=nrand)
+
+    adata.uns['SCN_gene_overlap'] = overlap
+    if randRes is not None:
+        # Kept out of .obsm because it has no corresponding cells.
+        adata.uns['SCN_random_scores'] = randRes
 
     # add the classification result as to `obsm`
     # adNew = AnnData(classRes, obs=adata.obs, var=pd.DataFrame(index=categories))
@@ -471,18 +603,64 @@ def classify_anndata(adata: AnnData, rf_tsp, nrand: int = 0):
     # can return copy if called for
     # return adata if copy else None
 
-def _scn_predict(rf_tsp, aDat, nrand = 2):
-    
-    if isinstance(aDat.X,np.ndarray):
-        # in the case of aDat.X is a numpy array 
-        aDat.X = anndata._core.views.ArrayView(aDat.X)
-###    expDat= pd.DataFrame(data=aDat.X, index= aDat.obs.index.values, columns= aDat.var.index.values)
-    expDat = pd.DataFrame(data=aDat.X.toarray(), index= aDat.obs.index.values, columns= aDat.var.index.values)
-    expValTrans = _query_transform(expDat.reindex(labels=rf_tsp['tpGeneArray'], axis='columns', fill_value=0), rf_tsp['topPairs'])
-    classRes_val = _rf_classPredict(rf_tsp['classifier'], expValTrans, numRand=nrand)
-    return classRes_val
+def _dense_query_frame(aDat, genes) -> pd.DataFrame:
+    """Densify only the genes a classifier needs.
 
-# there is an issue in that making the random profiles here will break later addition of results to original annData object
+    Slices the (usually sparse) expression matrix down to `genes` *before*
+    converting it to dense, so peak memory is set by the classifier's gene set
+    rather than by the width of the query. Genes absent from `aDat` become
+    zero-filled columns.
+
+    Args:
+        aDat (AnnData): The query data.
+        genes: Gene symbols to return, in the order the classifier expects them.
+
+    Returns:
+        pd.DataFrame: Cells x `genes`, dense, with absent genes filled with 0.
+    """
+    wanted = list(dict.fromkeys(str(g) for g in genes))
+    available = set(map(str, aDat.var_names))
+    present = [g for g in wanted if g in available]
+
+    sub = aDat[:, present]
+    X = sub.X
+    dense = X.toarray() if issparse(X) else np.asarray(X)
+
+    expDat = pd.DataFrame(data=dense, index=aDat.obs.index.values, columns=present)
+    # Absent genes are added here rather than being densified above.
+    return expDat.reindex(columns=wanted, fill_value=0)
+
+
+def _scn_predict(rf_tsp, aDat, nrand = 2):
+    """Score `aDat`, returning real-cell scores and the null distribution separately.
+
+    Args:
+        rf_tsp (dict): A trained classifier.
+        aDat (AnnData): The query data.
+        nrand (int): Number of randomized profiles to score as a null distribution.
+
+    Returns:
+        tuple: ``(cell_scores, rand_scores)``. `cell_scores` has exactly one row
+        per cell in `aDat`; `rand_scores` holds the randomized profiles, or None
+        when `nrand` is 0.
+    """
+    expDat = _dense_query_frame(aDat, rf_tsp['tpGeneArray'])
+    expValTrans = _query_transform(expDat, rf_tsp['topPairs'])
+    classRes_val = _rf_classPredict(rf_tsp['classifier'], expValTrans, numRand=nrand)
+
+    # _rf_classPredict appends the randomized profiles as extra rows; split them
+    # back off so the per-cell frame still aligns with aDat.obs.
+    n_cells = aDat.n_obs
+    cell_scores = classRes_val.iloc[:n_cells]
+    if nrand <= 0:
+        return cell_scores, None
+
+    rand_scores = classRes_val.iloc[n_cells:].copy()
+    rand_scores.index = [f"rand_{i}" for i in range(len(rand_scores))]
+    return cell_scores, rand_scores
+
+# Returns numRand extra rows beyond expQuery when numRand > 0; callers that align
+# results back to an AnnData must split those off (see _scn_predict).
 def _rf_classPredict(rfObj,expQuery,numRand=50):
     if numRand > 0 :
         randDat = _randomize(expQuery, num=numRand)
@@ -551,7 +729,10 @@ def train_classifier(
         prop_other = kwargs.pop('propOther')
 
     progress_total = 5
-    with alive_bar(progress_total, title="Training classifier") as bar:
+    # catch_warnings scopes the filter to training; setting it globally used to
+    # leave every later warning muted for the rest of the session, including the
+    # gene-overlap warning raised by classify_anndata.
+    with alive_bar(progress_total, title="Training classifier") as bar, warnings.catch_warnings():
         warnings.filterwarnings('ignore')
 
         # auto determine n_rand = mean number of cells per type
