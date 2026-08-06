@@ -35,11 +35,32 @@ def test_split_adata_indices(pbmc_ref):
 def test_train_classifier(trained_classifier):
     """Classifier dict should have expected keys."""
     clf = trained_classifier
-    expected_keys = {"tpGeneArray", "topPairs", "classifier", "diffExpGenes", "ctColors", "argList"}
+    expected_keys = {
+        "format_version",
+        "tpGeneArray",
+        "topPairs",
+        "topPairGenes",
+        "classifier",
+        "diffExpGenes",
+        "ctColors",
+        "argList",
+    }
     assert expected_keys == set(clf.keys())
     # Classifier should be a RandomForest
     from sklearn.ensemble import RandomForestClassifier
     assert isinstance(clf["classifier"], RandomForestClassifier)
+
+
+def test_train_classifier_stores_structural_gene_pairs(trained_classifier):
+    """Pair members are stored separately so underscored symbols stay recoverable."""
+    from pySingleCellNet.utils.classifier_io import SCN_CLASSIFIER_FORMAT_VERSION
+
+    clf = trained_classifier
+    assert clf["format_version"] == SCN_CLASSIFIER_FORMAT_VERSION
+
+    pair_genes = np.asarray(clf["topPairGenes"])
+    assert pair_genes.shape == (len(clf["topPairs"]), 2)
+    assert set(pair_genes.ravel()) <= set(clf["tpGeneArray"])
 
 
 def test_classify_anndata(classified_query):

@@ -42,6 +42,11 @@ from .knn import (
     generate_joint_graph
 )
 
+from .classifier_io import (
+    save_classifier,
+    load_classifier
+)
+
 # API
 __all__ = [
     "call_outlier_cells",
@@ -68,6 +73,8 @@ __all__ = [
     "get_unique_colors",
     "read_broken_geo_mtx",
     "build_knn_graph",
-    "generate_joint_graph"
+    "generate_joint_graph",
+    "save_classifier",
+    "load_classifier"
 ]
 

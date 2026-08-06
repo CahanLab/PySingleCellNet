@@ -10,6 +10,11 @@ import warnings
 import matplotlib.pyplot as plt
 from alive_progress import alive_bar
 from ..utils import build_knn_graph, get_unique_colors, split_adata_indices
+from ..utils.classifier_io import (
+    SCN_CLASSIFIER_FORMAT_VERSION,
+    _pair_labels,
+    _resolve_pair_genes,
+)
 from sklearn.metrics import classification_report
 from pySingleCellNet.config import SCN_DIFFEXP_KEY, SCN_CATEGORY_COLOR_DICT
 import random as rand 
@@ -55,26 +60,37 @@ def _rank_genes_subsets(
     return ans
 
 
-def _query_transform(expMat, genePairs):
-    npairs = len(genePairs)
-    ans = pd.DataFrame(0, index = expMat.index, columns = np.arange(npairs))
-    genes1=[]
-    genes2=[]
-    for g in genePairs:
-        sp=g.split("_")
-        genes1.append(sp[0])
-        genes2.append(sp[1])
-    expTemp=expMat.loc[:,np.unique(np.concatenate([genes1,genes2]))]
-    ans = pd.DataFrame(0, index = expTemp.index, columns = np.arange(npairs))
-    ans = ans.astype(pd.SparseDtype("int", 0))
-    temp1= expTemp.loc[:,genes1]
-    temp2= expTemp.loc[:,genes2]
-    temp1.columns=np.arange(npairs)
-    temp2.columns=np.arange(npairs)
-    boolArray = temp1 > temp2
-    ans = boolArray.astype(int)
-    ans.columns = genePairs
-    return(ans)
+def _query_transform(expMat, genePairs, genes=None):
+    """Turn expression into binary gene-pair features.
+
+    Each feature is 1 where the first gene of the pair is expressed above the
+    second and 0 otherwise.
+
+    Args:
+        expMat (pd.DataFrame): Cells x genes expression.
+        genePairs: Either an (n_pairs, 2) array of gene pairs or, for format 1
+            classifiers, a 1-D array of joined ``"geneA_geneB"`` labels.
+        genes: Optional classifier gene symbols, used to reject labels that
+            cannot be decoded unambiguously.
+
+    Returns:
+        pd.DataFrame: Cells x pairs of 0/1 values, columns labelled ``"geneA_geneB"``.
+    """
+    pair_genes = _resolve_pair_genes(genePairs, genes=genes)
+    npairs = len(pair_genes)
+
+    genes1 = list(pair_genes[:, 0])
+    genes2 = list(pair_genes[:, 1])
+
+    temp1 = expMat.loc[:, genes1]
+    temp2 = expMat.loc[:, genes2]
+    # Compare positionally: the same gene may appear in many pairs.
+    temp1.columns = np.arange(npairs)
+    temp2.columns = np.arange(npairs)
+
+    ans = (temp1 > temp2).astype(int)
+    ans.columns = _pair_labels(pair_genes)
+    return ans
 
 def create_classifier_report(adata: AnnData,
     ground_truth: str,
@@ -645,7 +661,11 @@ def _scn_predict(rf_tsp, aDat, nrand = 2):
         when `nrand` is 0.
     """
     expDat = _dense_query_frame(aDat, rf_tsp['tpGeneArray'])
-    expValTrans = _query_transform(expDat, rf_tsp['topPairs'])
+    # Prefer the structural pairs; fall back to splitting labels for format 1.
+    pairs = rf_tsp.get('topPairGenes')
+    if pairs is None:
+        pairs = rf_tsp['topPairs']
+    expValTrans = _query_transform(expDat, pairs, genes=rf_tsp['tpGeneArray'])
     classRes_val = _rf_classPredict(rf_tsp['classifier'], expValTrans, numRand=nrand)
 
     # _rf_classPredict appends the randomized profiles as extra rows; split them
@@ -757,9 +777,16 @@ def train_classifier(
         topX_per_diff_type = np.ceil(n_top_genes / 3)
         cgenesA, grps, cgenes_list = _get_classy_genes_3(adNorm, groupby=groupby, key_name=SCN_DIFFEXP_KEY, topX_per_diff_type=topX_per_diff_type, layer=layer)
         bar()  # Bar 2
-        xpairs = _generate_gene_pairs(cgenes_list, npairs=n_top_gene_pairs)
+        xpair_genes = _generate_gene_pairs(cgenes_list, npairs=n_top_gene_pairs)
+        xpairs = _pair_labels(xpair_genes)
+        if len(set(xpairs)) != len(xpairs):
+            raise ValueError(
+                "Two distinct gene pairs produced the same 'geneA_geneB' label, which "
+                "happens when gene symbols contain underscores in a way that makes the "
+                "labels ambiguous. Rename the offending genes before training."
+            )
         bar()  # Bar 3
-        pdTrain = _query_transform(expRaw.loc[:, cgenesA], xpairs)
+        pdTrain = _query_transform(expRaw.loc[:, cgenesA], xpair_genes)
 
         tspRF = _sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand=n_rand, ntrees=n_trees)
         bar()  # Bar 4
@@ -775,7 +802,16 @@ def train_classifier(
 
         argList = {'n_rand': n_rand, 'n_top_genes': n_top_genes, 'n_top_gene_pairs': n_top_gene_pairs, 'n_trees': n_trees, 'prop_other': prop_other}
 
-    return {'tpGeneArray': cgenesA, 'topPairs':xpairs, 'classifier': tspRF, 'diffExpGenes':cgenes_list, 'ctColors':cell_type_to_color, 'argList': argList}
+    return {
+        'format_version': SCN_CLASSIFIER_FORMAT_VERSION,
+        'tpGeneArray': cgenesA,
+        'topPairs': xpairs,
+        'topPairGenes': xpair_genes,
+        'classifier': tspRF,
+        'diffExpGenes': cgenes_list,
+        'ctColors': cell_type_to_color,
+        'argList': argList,
+    }
 
 
 def compute_celltype_proportions(adata, celltype_col='celltype', stage_col='stage', exclude=None):
@@ -844,7 +880,10 @@ def _generate_gene_pairs(
     :param genes_const: Optional list of genes to draw from for the 'const' category.
     :param prop_other: Proportion of pairs (out of npairs) whose second gene will be from OTHER lists.
     :param prop_same: Proportion of pairs whose second gene will be from the SAME list as the first gene.
-    :return: A 1D NumPy array of unique gene pairs (e.g. ["gene1_gene2", "geneA_geneB", ...]).
+    :return: An (n_pairs, 2) NumPy array of unique gene pairs, e.g.
+             [["gene1", "gene2"], ["geneA", "geneB"], ...]. Members are kept
+             separate rather than joined into one string so that gene symbols
+             containing underscores stay recoverable.
     
     The function ensures that:
       1) prop_other + prop_same <= 1.0
@@ -908,29 +947,31 @@ def _generate_gene_pairs(
             g1 = rand.choice(gene_list)
             g2 = pick_different_gene(g1, gene_list)
             if g2 is not None:
-                all_pairs.append(f"{g1}_{g2}")
-        
+                all_pairs.append((g1, g2))
+
         # --- OTHER pairs (second gene from other lists, g2 != g1) ---
         other_genes = []
         for other_key, other_list in cgenes_list.items():
             if other_key != key:
                 other_genes.extend(other_list)
-        
+
         for _ in range(other_count):
             g1 = rand.choice(gene_list)
             g2 = pick_different_gene(g1, other_genes)
             if g2 is not None:
-                all_pairs.append(f"{g1}_{g2}")
-        
+                all_pairs.append((g1, g2))
+
         # --- CONST pairs (second gene from genes_const, g2 != g1) ---
         for _ in range(const_count):
             g1 = rand.choice(gene_list)
             g2 = pick_different_gene(g1, genes_const)
             if g2 is not None:
-                all_pairs.append(f"{g1}_{g2}")
-    
-    # Convert to a NumPy array of unique values
-    return np.unique(all_pairs)
+                all_pairs.append((g1, g2))
+
+    # Deduplicate and order by display label, which keeps the feature order
+    # identical to the previous np.unique(joined_strings) behaviour.
+    unique_pairs = sorted(set(all_pairs), key=lambda pair: (f"{pair[0]}_{pair[1]}", pair))
+    return np.array(unique_pairs, dtype=object).reshape(-1, 2)
 
 
 
