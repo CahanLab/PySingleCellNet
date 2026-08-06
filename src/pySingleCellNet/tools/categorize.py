@@ -114,7 +114,12 @@ def categorize_classification(
         type2index = {graph.vs[i]["name"]: i for i in range(graph.vcount())}
     else:
         raise ValueError("graph does not have a 'name' attribute for vertices.")
-    
+
+    # Distances depend only on the graph, which has one vertex per cell type and
+    # does not change while categorizing. Computing the full matrix once avoids
+    # re-running a shortest-path search for every cell-type pair of every cell.
+    distances = graph.distances()
+
     def is_all_within_k_edges(cell_types):
         """Check if all pairs of cell types are within k edges in the graph.
 
@@ -133,8 +138,7 @@ def categorize_classification(
                     return False
                 idx1 = type2index[ct1]
                 idx2 = type2index[ct2]
-                dist = graph.distances(idx1, idx2)[0][0]
-                if dist >= k:
+                if distances[idx1][idx2] >= k:
                     return False
         return True
     

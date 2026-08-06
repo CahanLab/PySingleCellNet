@@ -333,8 +333,10 @@ def _get_classy_genes_3(
             proportion_top=proportion_top,
         )
         
-        # De-duplicate and store results for this cell type
-        final_list = list(set(xlist))
+        # De-duplicate, keeping first-seen order. A set() here would order the
+        # genes by string hash, which varies per process (PYTHONHASHSEED) and
+        # made seeded training irreproducible across runs.
+        final_list = list(dict.fromkeys(xlist))
         gene_dict[g] = final_list
         gene_list += final_list
         
@@ -358,7 +360,7 @@ def _get_classy_genes_3(
             
             # Maybe also relax min_in / max_out conditions in fallback or skip them.
             # Combine fallback results
-            fallback_final = list(set(gene_dict[g] + fallback_genes))
+            fallback_final = list(dict.fromkeys(gene_dict[g] + fallback_genes))
             
             # If we *still* don't meet min_genes, just take the top N from fallback
             if len(fallback_final) < min_genes:
@@ -369,34 +371,38 @@ def _get_classy_genes_3(
             # Merge into overall gene_list
             gene_list += fallback_final
     
-    # Combine all unique genes across all groups
-    cgenes2 = list(set(gene_list))
+    # Combine all unique genes across all groups, order-stable (see above).
+    cgenes2 = list(dict.fromkeys(gene_list))
     
     return cgenes2, grps, gene_dict
 
 
 
-def _randomize(expDat: pd.DataFrame, num: int = 50) -> pd.DataFrame:
+def _randomize(expDat: pd.DataFrame, num: int = 50, rng=None) -> pd.DataFrame:
     """
     Randomize the rows and columns of a pandas DataFrame.
 
     Args:
         expDat (pd.DataFrame): the input DataFrame
         num (int): the number of rows to return (default 50)
+        rng: Optional numpy Generator. Defaults to the global numpy RNG, which
+            makes results depend on process-wide state; pass one for reproducibility.
 
     Returns:
         pd.DataFrame: the randomized DataFrame with num rows and the same columns as expDat
     """
 
+    draw = np.random.choice if rng is None else rng.choice
+
     # Convert DataFrame to NumPy array
     temp = expDat.to_numpy()
 
     # Randomize the rows of the array
-    temp = np.array([np.random.choice(x, len(x), replace=False) for x in temp])
+    temp = np.array([draw(x, len(x), replace=False) for x in temp])
 
     # Transpose the array and randomize the columns
     temp = temp.T
-    temp = np.array([np.random.choice(x, len(x), replace=False) for x in temp]).T
+    temp = np.array([draw(x, len(x), replace=False) for x in temp]).T
 
     # Convert the array back to a DataFrame and return the first num rows
     return pd.DataFrame(data=temp, columns=expDat.columns).iloc[0:num, :]
@@ -407,7 +413,9 @@ def _sc_makeClassifier(
     groups: np.ndarray,
     nRand: int = 70,
     ntrees: int = 2000,
-    stratify: bool = False
+    stratify: bool = False,
+    rng=None,
+    random_state: int = 100
 ) -> RandomForestClassifier:
     """
     Train a random forest classifier on gene expression data. Private
@@ -419,13 +427,15 @@ def _sc_makeClassifier(
         nRand (int): the number of randomized samples to generate (default 70)
         ntrees (int): the number of trees in the random forest (default 2000)
         stratify (bool): whether to stratify the random forest by class label (default False)
+        rng: Optional numpy Generator used to build the randomized profiles.
+        random_state (int): Seed for the random forest itself (default 100).
 
     Returns:
         RandomForestClassifier: the trained random forest classifier
     """
 
     # Randomize the training data and concatenate with the original data
-    randDat = _randomize(expTrain, num=nRand)
+    randDat = _randomize(expTrain, num=nRand, rng=rng)
     expT = pd.concat([expTrain, randDat])
 
     # Get the list of all genes and missing genes
@@ -437,9 +447,9 @@ def _sc_makeClassifier(
 
     # Train a random forest classifier
     if not stratify:
-        clf = RandomForestClassifier(n_estimators=ntrees, random_state=100)
+        clf = RandomForestClassifier(n_estimators=ntrees, random_state=random_state)
     else:
-        clf = RandomForestClassifier(n_estimators=ntrees, class_weight="balanced", random_state=100)
+        clf = RandomForestClassifier(n_estimators=ntrees, class_weight="balanced", random_state=random_state)
     ggroups = np.append(np.array(groups), np.repeat("rand", nRand)).flatten()
     ## #### ## clf.fit(expT.loc[:, ggenes].to_numpy(), ggroups)
     clf.fit(expT.loc[:, ggenes], ggroups)
@@ -745,6 +755,7 @@ def train_classifier(
     layer: str = None,
     n_comps: int = 50,
     build_graph: bool = True,
+    random_state: int = None,
     **kwargs
 ) -> dict:
     """Train a cell type classifier on labeled single-cell data.
@@ -766,6 +777,9 @@ def train_classifier(
         build_graph: Whether to build the PAGA cell-type relatedness graph and
             ship it as `'ctGraph'`. Needed by `tl.categorize_classification` to
             separate Intermediate from Hybrid cells. Defaults to True.
+        random_state: Seed for gene-pair selection, the randomized profiles and
+            the forest. Defaults to None, which draws on process-wide RNG state
+            and so does not reproduce. Pass an int for a reproducible classifier.
 
     Returns:
         Dictionary containing the trained classifier and associated metadata:
@@ -799,6 +813,11 @@ def train_classifier(
         warnings.warn("propOther is deprecated, use prop_other instead", DeprecationWarning, stacklevel=2)
         prop_other = kwargs.pop('propOther')
 
+    # Dedicated RNGs so that seeding is local to this call: relying on the global
+    # random / numpy state made two identically-seeded runs diverge.
+    py_rng = rand.Random(random_state) if random_state is not None else None
+    np_rng = np.random.default_rng(random_state) if random_state is not None else None
+
     progress_total = 5
     # catch_warnings scopes the filter to training; setting it globally used to
     # leave every later warning muted for the rest of the session, including the
@@ -828,7 +847,7 @@ def train_classifier(
         topX_per_diff_type = np.ceil(n_top_genes / 3)
         cgenesA, grps, cgenes_list = _get_classy_genes_3(adNorm, groupby=groupby, key_name=SCN_DIFFEXP_KEY, topX_per_diff_type=topX_per_diff_type, layer=layer)
         bar()  # Bar 2
-        xpair_genes = _generate_gene_pairs(cgenes_list, npairs=n_top_gene_pairs)
+        xpair_genes = _generate_gene_pairs(cgenes_list, npairs=n_top_gene_pairs, rng=py_rng)
         xpairs = _pair_labels(xpair_genes)
         if len(set(xpairs)) != len(xpairs):
             raise ValueError(
@@ -839,7 +858,10 @@ def train_classifier(
         bar()  # Bar 3
         pdTrain = _query_transform(expRaw.loc[:, cgenesA], xpair_genes)
 
-        tspRF = _sc_makeClassifier(pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand=n_rand, ntrees=n_trees)
+        tspRF = _sc_makeClassifier(
+            pdTrain.loc[:, xpairs], genes=xpairs, groups=grps, nRand=n_rand, ntrees=n_trees,
+            rng=np_rng, random_state=100 if random_state is None else random_state,
+        )
         bar()  # Bar 4
 
         # set celltype colors - add 'rand' celltype
@@ -924,7 +946,8 @@ def _generate_gene_pairs(
     npairs: int = 50,
     genes_const: list = None,
     prop_other: float = 0.4,
-    prop_same: float = 0.4
+    prop_same: float = 0.4,
+    rng=None
 ) -> np.ndarray:
     """
     Generate a random selection of gene pairs for each list in cgenes_list and 
@@ -936,6 +959,8 @@ def _generate_gene_pairs(
     :param genes_const: Optional list of genes to draw from for the 'const' category.
     :param prop_other: Proportion of pairs (out of npairs) whose second gene will be from OTHER lists.
     :param prop_same: Proportion of pairs whose second gene will be from the SAME list as the first gene.
+    :param rng: Optional `random.Random` instance. Defaults to the global `random`
+                module, whose state is process-wide; pass one for reproducibility.
     :return: An (n_pairs, 2) NumPy array of unique gene pairs, e.g.
              [["gene1", "gene2"], ["geneA", "geneB"], ...]. Members are kept
              separate rather than joined into one string so that gene symbols
@@ -952,6 +977,8 @@ def _generate_gene_pairs(
     Additionally, no gene pair will be made of the same two genes (i.e. g1 != g2).
     """
 
+    chooser = rand if rng is None else rng
+
     def pick_different_gene(current_gene, gene_pool):
         """
         Return a random gene from gene_pool that is not equal to current_gene.
@@ -960,8 +987,8 @@ def _generate_gene_pairs(
         valid_genes = [g for g in gene_pool if g != current_gene]
         if not valid_genes:
             return None
-        return rand.choice(valid_genes)
-    
+        return chooser.choice(valid_genes)
+
     # 1) Basic checks
     if (prop_other + prop_same) > 1.0:
         raise ValueError("prop_other + prop_same cannot exceed 1.0.")
@@ -1000,7 +1027,7 @@ def _generate_gene_pairs(
         
         # --- SAME pairs (both genes from same list, g2 != g1) ---
         for _ in range(same_count):
-            g1 = rand.choice(gene_list)
+            g1 = chooser.choice(gene_list)
             g2 = pick_different_gene(g1, gene_list)
             if g2 is not None:
                 all_pairs.append((g1, g2))
@@ -1012,14 +1039,14 @@ def _generate_gene_pairs(
                 other_genes.extend(other_list)
 
         for _ in range(other_count):
-            g1 = rand.choice(gene_list)
+            g1 = chooser.choice(gene_list)
             g2 = pick_different_gene(g1, other_genes)
             if g2 is not None:
                 all_pairs.append((g1, g2))
 
         # --- CONST pairs (second gene from genes_const, g2 != g1) ---
         for _ in range(const_count):
-            g1 = rand.choice(gene_list)
+            g1 = chooser.choice(gene_list)
             g2 = pick_different_gene(g1, genes_const)
             if g2 is not None:
                 all_pairs.append((g1, g2))

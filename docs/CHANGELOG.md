@@ -9,6 +9,7 @@ All notable changes to PySingleCellNet should be listed here. The definition of 
 tl.score_gene_sets should add scores, one matrix to .obsm and not as columsn to .obs
 
 ### Added
+- `tl.train_classifier`: `random_state` parameter making training reproducible. Seeds gene-pair selection, the randomized profiles and the forest. Defaults to `None` (previous unseeded behaviour).
 - `ut.save_classifier` / `ut.load_classifier`: persist a trained classifier with a recorded `format_version`. Loading validates the required keys and that the estimator is fitted, migrates older payloads, and turns a missing-module unpickling failure into an install hint — so a malformed classifier fails at load rather than deep inside prediction.
 - `tl.suggest_pcs_to_drop`: automatically identify PCs driven by a confounder gene list (e.g., cell-cycle genes) using FDR, correlation, and impact-score thresholds
 - `ut.remove_confounder_pcs`: convenience wrapper that flags and removes confounder PCs in one call
@@ -37,7 +38,8 @@ tl.score_gene_sets should add scores, one matrix to .obsm and not as columsn to 
 - `tl.classify_anndata`: `nrand > 0` raised `ValueError: value.index does not match parent's obs names` because the randomized profiles were concatenated into the per-cell result. The null distribution now goes to `.uns['SCN_random_scores']`. Negative `nrand` raises.
 - `tl.classify_anndata`: the whole query was densified before being subset to the classifier's genes (~24 GB for a 100k x 30k query to reach a ~0.2 GB matrix). Columns are now sliced before densification, so peak memory scales with the classifier's gene set.
 - `tl.train_classifier`: no longer leaves a global `warnings.filterwarnings('ignore')` in place, which had muted every warning for the rest of the session — including the new gene-overlap warning.
-- `tl.categorize_classification`: use `igraph.Graph.distances()` instead of the deprecated `Graph.shortest_paths()`, which emitted a `DeprecationWarning` per cell-type pair per cell (hundreds per call).
+- `tl.train_classifier`: candidate gene lists were de-duplicated with `set()`, whose string iteration order depends on `PYTHONHASHSEED`. Two runs in different processes therefore selected different gene pairs even with the RNG seeded, so a classifier could not be reproduced. De-duplication is now order-preserving.
+- `tl.categorize_classification`: use `igraph.Graph.distances()` instead of the deprecated `Graph.shortest_paths()`, which emitted a `DeprecationWarning` per cell-type pair per cell (hundreds per call). The distance matrix is also computed once per call rather than re-derived for every cell.
 - `tl.comp_ct_thresh`: use `in adata.obsm` instead of the deprecated `adata.obsm_keys()`.
 - tl.cluster_subclusters calls sc.pp.pca with mask_var instead of use_highly_variable
 - `tl.train_classifier`: `n_rand` auto-calculation now returns `int` instead of `np.float64` (fixes pandas iloc error)

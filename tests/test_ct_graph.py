@@ -52,6 +52,50 @@ def test_explicit_graph_takes_precedence_over_the_classifier(classified_query, t
     assert "Intermediate" not in set(ad.obs["SCN_class_type"].unique())
 
 
+def _count_distance_calls(adata, thresholds, graph):
+    """Run categorization, returning how many times the graph was queried."""
+    from pySingleCellNet.tools.categorize import categorize_classification
+
+    calls = []
+    original = graph.distances
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    graph.distances = spy
+    try:
+        categorize_classification(adata, thresholds=thresholds, graph=graph)
+    finally:
+        del graph.distances
+    return len(calls)
+
+
+def test_distance_lookups_do_not_scale_with_cell_count(classified_query, trained_classifier):
+    """Shortest paths depend only on the graph, so they must not be recomputed per cell."""
+    from pySingleCellNet.tools.categorize import comp_ct_thresh
+
+    graph = trained_classifier["ctGraph"]
+
+    small = classified_query[: classified_query.n_obs // 4].copy()
+    full = classified_query.copy()
+    assert full.n_obs > small.n_obs * 2, "need a meaningful size difference"
+
+    small_calls = _count_distance_calls(small, comp_ct_thresh(small), graph)
+    full_calls = _count_distance_calls(full, comp_ct_thresh(full), graph)
+
+    assert small_calls == full_calls
+
+
+def test_distances_are_computed_at_most_once(classified_query, trained_classifier):
+    """The whole distance matrix is small; one computation per call is enough."""
+    from pySingleCellNet.tools.categorize import comp_ct_thresh
+
+    ad = classified_query.copy()
+    calls = _count_distance_calls(ad, comp_ct_thresh(ad), trained_classifier["ctGraph"])
+    assert calls <= 1
+
+
 def test_categorize_without_graph_or_classifier_raises(classified_query):
     """Neither source of a graph means a clear error, not a silent guess."""
     from pySingleCellNet.tools.categorize import categorize_classification, comp_ct_thresh
