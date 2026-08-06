@@ -43,6 +43,7 @@ def test_train_classifier(trained_classifier):
         "classifier",
         "diffExpGenes",
         "ctColors",
+        "ctGraph",
         "argList",
     }
     assert expected_keys == set(clf.keys())

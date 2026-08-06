@@ -22,6 +22,8 @@ tl.score_gene_sets should add scores, one matrix to .obsm and not as columsn to 
 - Exported `tl.subset_modules_top_genes` (was defined but not in `__init__.py`)
 
 ### Changed
+- `tl.train_classifier`: now returns `'ctGraph'` (the PAGA cell-type relatedness graph), `'topPairGenes'` and `'format_version'` alongside the existing keys. Graph building can be skipped with `build_graph=False`.
+- `tl.categorize_classification`: accepts `clf=` and takes the cell-type graph from `clf['ctGraph']` when `graph=` is not given, so the Intermediate/Hybrid distinction now travels with a shared classifier instead of requiring the original reference data. An explicit `graph=` still wins.
 - `tl.correlate_module_scores_with_pcs`: now returns `fdr` (Benjamini-Hochberg adjusted p-values) and `impact_score` (correlation² × variance_ratio) columns
 - tl.cluster_subclusters layer should be None instead of counts
 - Completed Google-style docstrings (Args/Returns/Raises) across all public functions for mkdocs auto-extraction

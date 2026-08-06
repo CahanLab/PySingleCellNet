@@ -15,6 +15,7 @@ from ..utils.classifier_io import (
     _pair_labels,
     _resolve_pair_genes,
 )
+from .categorize import paga_connectivities_to_igraph
 from sklearn.metrics import classification_report
 from pySingleCellNet.config import SCN_DIFFEXP_KEY, SCN_CATEGORY_COLOR_DICT
 import random as rand 
@@ -689,6 +690,49 @@ def _rf_classPredict(rfObj,expQuery,numRand=50):
     return xpreds
 
 
+def _build_celltype_graph(adata: AnnData, groupby: str, n_comps: int):
+    """Build the PAGA-derived cell-type relatedness graph for a training set.
+
+    `tl.categorize_classification` needs this graph to tell Intermediate cells
+    from Hybrid ones, so it is built at training time and shipped with the
+    classifier rather than left for the consumer to reconstruct.
+
+    Args:
+        adata (AnnData): Training data with `.var['highly_variable']` set.
+        groupby (str): The `.obs` column holding cell type labels.
+        n_comps (int): Number of principal components to use.
+
+    Returns:
+        ig.Graph or None: The graph, or None (with a warning) if it could not
+        be built -- for example when there is only one cell type.
+    """
+    n_types = adata.obs[groupby].nunique()
+    if n_types < 2:
+        warnings.warn(
+            f"Only {n_types} cell type(s) in '{groupby}', so no cell-type graph was "
+            "built. tl.categorize_classification cannot separate Intermediate from "
+            "Hybrid without one.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return None
+
+    try:
+        # Silence scanpy's PCA/neighbors chatter without muting our own warnings.
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore')
+            return paga_connectivities_to_igraph(adata, group_key=groupby, n_comps=n_comps)
+    except Exception as err:  # noqa: BLE001 - graph building is auxiliary to training
+        warnings.warn(
+            f"Could not build the cell-type graph ({type(err).__name__}: {err}). The "
+            "classifier is still usable, but tl.categorize_classification will need a "
+            "graph passed explicitly.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return None
+
+
 def train_classifier(
     adata: AnnData = None,
     groupby: str = None,
@@ -700,6 +744,7 @@ def train_classifier(
     prop_other: float = 0.5,
     layer: str = None,
     n_comps: int = 50,
+    build_graph: bool = True,
     **kwargs
 ) -> dict:
     """Train a cell type classifier on labeled single-cell data.
@@ -718,9 +763,15 @@ def train_classifier(
         prop_other: Proportion of pairs from other cell types. Defaults to 0.5.
         layer: Layer to use for expression values. Defaults to None (uses .X).
         n_comps: Number of PCA components. Defaults to 50.
+        build_graph: Whether to build the PAGA cell-type relatedness graph and
+            ship it as `'ctGraph'`. Needed by `tl.categorize_classification` to
+            separate Intermediate from Hybrid cells. Defaults to True.
 
     Returns:
-        Dictionary containing trained classifier and associated metadata.
+        Dictionary containing the trained classifier and associated metadata:
+        `'format_version'`, `'tpGeneArray'`, `'topPairs'` (display labels),
+        `'topPairGenes'` ((n_pairs, 2) array of pair members), `'classifier'`,
+        `'diffExpGenes'`, `'ctColors'`, `'ctGraph'` and `'argList'`.
 
     Example:
         >>> clf = train_classifier(adata, groupby='celltype', n_top_genes=50)
@@ -802,6 +853,10 @@ def train_classifier(
 
         argList = {'n_rand': n_rand, 'n_top_genes': n_top_genes, 'n_top_gene_pairs': n_top_gene_pairs, 'n_trees': n_trees, 'prop_other': prop_other}
 
+    # Built outside the block above so that its warnings are not swallowed by the
+    # blanket filter training uses to quiet scanpy.
+    ct_graph = _build_celltype_graph(adNorm, groupby, n_comps) if build_graph else None
+
     return {
         'format_version': SCN_CLASSIFIER_FORMAT_VERSION,
         'tpGeneArray': cgenesA,
@@ -810,6 +865,7 @@ def train_classifier(
         'classifier': tspRF,
         'diffExpGenes': cgenes_list,
         'ctColors': cell_type_to_color,
+        'ctGraph': ct_graph,
         'argList': argList,
     }
 

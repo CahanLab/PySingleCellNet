@@ -34,7 +34,8 @@ def categorize_classification(
     k: int = 3,
     columns_to_ignore: list = ["rand"],
     inplace: bool = True,
-    class_obs_name: str = 'SCN_class_argmax'
+    class_obs_name: str = 'SCN_class_argmax',
+    clf: dict = None
 ):
     """Classify cells based on SCN scores and thresholds, then categorize 
     multi-class cells as either 'Intermediate' or 'Hybrid'.
@@ -54,15 +55,19 @@ def categorize_classification(
             - `.obs[class_obs_name]`: Predicted cell type (argmax classification).
         thresholds (pd.DataFrame): Thresholds for each cell type. Expected to 
             match the columns in `SCN_score`.
-        graph (ig.Graph): An iGraph describing relationships between cell types. 
-            Must have vertex names matching the cell-type columns in SCN_score.
+        graph (ig.Graph, optional): An iGraph describing relationships between cell
+            types. Must have vertex names matching the cell-type columns in SCN_score.
+            If omitted, the graph is taken from `clf['ctGraph']`.
         k (int, optional): Maximum graph distance to consider cell types "Intermediate". Defaults to 3.
         columns_to_ignore (list, optional): List of SCN score columns to ignore. Defaults to ["rand"].
         inplace (bool, optional): If True, modify `adata_c` in place. Otherwise, return a new AnnData object. Defaults to True.
         class_obs_name (str, optional): The name of the `.obs` column with argmax classification. Defaults to 'SCN_class_argmax'.
+        clf (dict, optional): A classifier from `tl.train_classifier`, used as the
+            source of the cell-type graph when `graph` is not given. `graph` wins
+            if both are supplied.
 
     Raises:
-        ValueError: If `graph` is None.
+        ValueError: If no graph is available from either `graph` or `clf`.
         ValueError: If "SCN_score" is missing in `adata_c.obsm`.
         ValueError: If `class_obs_name` is not found in `adata_c.obs`.
         ValueError: If the provided graph does not have vertex "name" attributes.
@@ -70,9 +75,22 @@ def categorize_classification(
     Returns:
         AnnData or None: Returns modified AnnData if `inplace` is False, otherwise None.
     """
+    if graph is None and clf is not None:
+        graph = clf.get('ctGraph')
+        if graph is None:
+            raise ValueError(
+                "The supplied classifier has no 'ctGraph'. It was either trained with "
+                "build_graph=False or predates the cell-type graph being shipped with "
+                "classifiers. Retrain with tl.train_classifier, or build one with "
+                "tl.paga_connectivities_to_igraph and pass it as graph=."
+            )
+
     if graph is None:
-        raise ValueError("A valid iGraph 'graph' must be provided. None was given.")
-    
+        raise ValueError(
+            "A valid iGraph 'graph' must be provided, either directly via graph= or "
+            "via clf= from a classifier trained with tl.train_classifier. None was given."
+        )
+
     if "SCN_score" not in adata_c.obsm:
         raise ValueError("No 'SCN_score' in adata_c.obsm. Please provide SCN scores.")
     
